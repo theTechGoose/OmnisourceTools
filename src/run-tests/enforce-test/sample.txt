@@ -1,0 +1,96 @@
+{
+  code: 1,
+  out: "\x1b[0m\x1b[38;5;245mrunning 2 tests from ./enforce-check/test.ts\x1b[0m\n" +
+    "runDenoCheck should return empty array for valid TypeScript ... \x1b[0m\x1b[32mok\x1b[0m \x1b[0m\x1b[38;5;245m(116ms)\x1b[0m\n" +
+    "runDenoCheck should detect type errors ... \x1b[0m\x1b[32mok\x1b[0m \x1b[0m\x1b[38;5;245m(128ms)\x1b[0m\n" +
+    "\x1b[0m\x1b[38;5;245mrunning 2 tests from ./enforce-dirs/test.ts\x1b[0m\n" +
+    "enforceStructure should detect missing required files ... \x1b[0m\x1b[32mok\x1b[0m \x1b[0m\x1b[38;5;245m(1ms)\x1b[0m\n" +
+    "enforceStructure should pass with correct structure ... \x1b[0m\x1b[32mok\x1b[0m \x1b[0m\x1b[38;5;245m(1ms)\x1b[0m\n" +
+    "\x1b[0m\x1b[38;5;245mrunning 4 tests from ./enforce-imports/test.ts\x1b[0m\n" +
+    "parseGrepOutput should parse grep output correctly ... \x1b[0m\x1b[32mok\x1b[0m \x1b[0m\x1b[38;5;245m(0ms)\x1b[0m\n" +
+    "parseGrepOutput should handle empty output ... \x1b[0m\x1b[32mok\x1b[0m \x1b[0m\x1b[38;5;245m(0ms)\x1b[0m\n" +
+    "findInvalidRelativeImports should return empty for clean imports ... \x1b[0m\x1b[32mok\x1b[0m \x1b[0m\x1b[38;5;245m(2ms)\x1b[0m\n" +
+    "findInvalidRelativeImports should detect ../ imports ... \x1b[0m\x1b[32mok\x1b[0m \x1b[0m\x1b[38;5;245m(1ms)\x1b[0m\n" +
+    "\x1b[0m\x1b[38;5;245mrunning 2 tests from ./enforce-lint/test.ts\x1b[0m\n" +
+    "runDenoLint should return empty array for clean code ... \x1b[0m\x1b[32mok\x1b[0m \x1b[0m\x1b[38;5;245m(9ms)\x1b[0m\n" +
+    "runDenoLint should detect lint issues ... \x1b[0m\x1b[32mok\x1b[0m \x1b[0m\x1b[38;5;245m(8ms)\x1b[0m\n" +
+    "\x1b[0m\x1b[38;5;245mrunning 2 tests from ./enforce-test/test.ts\x1b[0m\n" +
+    "runDenoTest should return empty array when tests pass ...\n" +
+    "\x1b[0m\x1b[38;5;245m------- post-test output -------\x1b[0m\n" +
+    "{\n" +
+    "  code: 0,\n" +
+    '  out: "\\x1b[0m\\x1b[38;5;245mrunning 1 test from ../../../../../../../../../../var/folders/r2/943r0t357mj8qz739bk12m7c0000gn/T/baed17304d241129/passing.test.ts\\x1b[0m\\n" +\n' +
+    '    "passing test ... \\x1b[0m\\x1b[32mok\\x1b[0m \\x1b[0m\\x1b[38;5;245m(0ms)\\x1b[0m\\n" +\n' +
+    '    "\\n" +\n' +
+    '    "\\x1b[0m\\x1b[32mok\\x1b[0m | 1 passed | 0 failed \\x1b[0m\\x1b[38;5;245m(2ms)\\x1b[0m\\n" +\n' +
+    '    "\\n",\n' +
+    "  err: \"\\x1b[0m\\x1b[33mWarning\\x1b[0m The `--env-file` flag was used, but the environment file specified '/var/folders/r2/943r0t357mj8qz739bk12m7c0000gn/T/baed17304d241129/env/local' was not found.\\n\"\n" +
+    "}\n" +
+    "\x1b[0m\x1b[38;5;245m----- post-test output end -----\x1b[0m\n" +
+    "runDenoTest should return empty array when tests pass ... \x1b[0m\x1b[32mok\x1b[0m \x1b[0m\x1b[38;5;245m(41ms)\x1b[0m\n" +
+    "runDenoTest should detect failing tests ...\n" +
+    "\x1b[0m\x1b[38;5;245m------- post-test output -------\x1b[0m\n" +
+    "{\n" +
+    "  code: 1,\n" +
+    '  out: "\\x1b[0m\\x1b[38;5;245mrunning 1 test from ../../../../../../../../../../var/folders/r2/943r0t357mj8qz739bk12m7c0000gn/T/fcc99031536c0264/failing.test.ts\\x1b[0m\\n" +\n' +
+    '    "failing test ... \\x1b[0m\\x1b[31mFAILED\\x1b[0m \\x1b[0m\\x1b[38;5;245m(0ms)\\x1b[0m\\n" +\n' +
+    '    "\\n" +\n' +
+    '    "\\x1b[0m\\x1b[1m\\x1b[37m\\x1b[41m ERRORS \\x1b[0m\\n" +\n' +
+    '    "\\n" +\n' +
+    '    "failing test \\x1b[0m\\x1b[38;5;245m=> ../../../../../../../../../../var/folders/r2/943r0t357mj8qz739bk12m7c0000gn/T/fcc99031536c0264/failing.test.ts:3:10\\x1b[0m\\n" +\n' +
+    '    "\\x1b[0m\\x1b[1m\\x1b[31merror\\x1b[0m: AssertionError: Values are not equal.\\n" +\n' +
+    '    "\\n" +\n' +
+    '    "\\n" +\n' +
+    '    "    \\x1b[90m\\x1b[1m[Diff]\\x1b[22m\\x1b[39m \\x1b[31m\\x1b[1mActual\\x1b[22m\\x1b[39m / \\x1b[32m\\x1b[1mExpected\\x1b[22m\\x1b[39m\\n" +\n' +
+    '    "\\n" +\n' +
+    '    "\\n" +\n' +
+    '    "\\x1b[31m\\x1b[1m-   1\\x1b[22m\\x1b[39m\\n" +\n' +
+    '    "\\x1b[32m\\x1b[1m+   2\\x1b[22m\\x1b[39m\\n" +\n' +
+    '    "\\n" +\n' +
+    '    "  throw new AssertionError(message);\\n" +\n' +
+    '    "\\x1b[0m\\x1b[31m        ^\\x1b[0m\\n" +\n' +
+    '    "    at \\x1b[0m\\x1b[1m\\x1b[3massertEquals\\x1b[0m (\\x1b[0m\\x1b[36mhttps://deno.land/std@0.208.0/assert/assert_equals.ts\\x1b[0m:\\x1b[0m\\x1b[33m53\\x1b[0m:\\x1b[0m\\x1b[33m9\\x1b[0m)\\n" +\n' +
+    '    "    at \\x1b[0m\\x1b[36mfile:///var/folders/r2/943r0t357mj8qz739bk12m7c0000gn/T/fcc99031536c0264/failing.test.ts\\x1b[0m:\\x1b[0m\\x1b[33m4\\x1b[0m:\\x1b[0m\\x1b[33m7\\x1b[0m\\n" +\n' +
+    '    "\\n" +\n' +
+    '    "\\x1b[0m\\x1b[1m\\x1b[37m\\x1b[41m FAILURES \\x1b[0m\\n" +\n' +
+    '    "\\n" +\n' +
+    '    "failing test \\x1b[0m\\x1b[38;5;245m=> ../../../../../../../../../../var/folders/r2/943r0t357mj8qz739bk12m7c0000gn/T/fcc99031536c0264/failing.test.ts:3:10\\x1b[0m\\n" +\n' +
+    '    "\\n" +\n' +
+    '    "\\x1b[0m\\x1b[31mFAILED\\x1b[0m | 0 passed | 1 failed \\x1b[0m\\x1b[38;5;245m(3ms)\\x1b[0m\\n" +\n' +
+    '    "\\n",\n' +
+    "  err: \"\\x1b[0m\\x1b[33mWarning\\x1b[0m The `--env-file` flag was used, but the environment file specified '/var/folders/r2/943r0t357mj8qz739bk12m7c0000gn/T/fcc99031536c0264/env/local' was not found.\\n\" +\n" +
+    '    "\\x1b[0m\\x1b[1m\\x1b[31merror\\x1b[0m: Test failed\\n"\n' +
+    "}\n" +
+    "\x1b[0m\x1b[38;5;245m----- post-test output end -----\x1b[0m\n" +
+    "runDenoTest should detect failing tests ... \x1b[0m\x1b[31mFAILED\x1b[0m \x1b[0m\x1b[38;5;245m(34ms)\x1b[0m\n" +
+    "\x1b[0m\x1b[38;5;245mrunning 3 tests from ./utils/test.ts\x1b[0m\n" +
+    "getEnvFile should return env file path ... \x1b[0m\x1b[32mok\x1b[0m \x1b[0m\x1b[38;5;245m(6ms)\x1b[0m\n" +
+    "Issue type should have correct shape ... \x1b[0m\x1b[32mok\x1b[0m \x1b[0m\x1b[38;5;245m(0ms)\x1b[0m\n" +
+    "Spec type should accept valid structures ... \x1b[0m\x1b[32mok\x1b[0m \x1b[0m\x1b[38;5;245m(0ms)\x1b[0m\n" +
+    "\n" +
+    "\x1b[0m\x1b[1m\x1b[37m\x1b[41m ERRORS \x1b[0m\n" +
+    "\n" +
+    "runDenoTest should detect failing tests \x1b[0m\x1b[38;5;245m=> ./enforce-test/test.ts:22:6\x1b[0m\n" +
+    "\x1b[0m\x1b[1m\x1b[31merror\x1b[0m: AssertionError: Values are not equal.\n" +
+    "\n" +
+    "\n" +
+    "    \x1b[90m\x1b[1m[Diff]\x1b[22m\x1b[39m \x1b[31m\x1b[1mActual\x1b[22m\x1b[39m / \x1b[32m\x1b[1mExpected\x1b[22m\x1b[39m\n" +
+    "\n" +
+    "\n" +
+    "\x1b[31m\x1b[1m-   false\x1b[22m\x1b[39m\n" +
+    "\x1b[32m\x1b[1m+   true\x1b[22m\x1b[39m\n" +
+    "\n" +
+    "  throw new AssertionError(message);\n" +
+    "\x1b[0m\x1b[31m        ^\x1b[0m\n" +
+    "    at \x1b[0m\x1b[1m\x1b[3massertEquals\x1b[0m (\x1b[0m\x1b[36mhttps://deno.land/std@0.208.0/assert/assert_equals.ts\x1b[0m:\x1b[0m\x1b[33m53\x1b[0m:\x1b[0m\x1b[33m9\x1b[0m)\n" +
+    "    at \x1b[0m\x1b[36mfile:///Users/raphaelcastro/Documents/programming/OmniSource/src/tooling/standalone/src/run-tests/enforce-test/test.ts\x1b[0m:\x1b[0m\x1b[33m34\x1b[0m:\x1b[0m\x1b[33m3\x1b[0m\n" +
+    "\n" +
+    "\x1b[0m\x1b[1m\x1b[37m\x1b[41m FAILURES \x1b[0m\n" +
+    "\n" +
+    "runDenoTest should detect failing tests \x1b[0m\x1b[38;5;245m=> ./enforce-test/test.ts:22:6\x1b[0m\n" +
+    "\n" +
+    "\x1b[0m\x1b[31mFAILED\x1b[0m | 14 passed | 1 failed \x1b[0m\x1b[38;5;245m(444ms)\x1b[0m\n" +
+    "\n",
+  err: "\x1b[0m\x1b[33mWarning\x1b[0m The `--env-file` flag was used, but the environment file specified '/Users/raphaelcastro/Documents/programming/OmniSource/src/tooling/standalone/env/local' was not found.\n" +
+    "\x1b[0m\x1b[1m\x1b[31merror\x1b[0m: Test failed\n"
+}
