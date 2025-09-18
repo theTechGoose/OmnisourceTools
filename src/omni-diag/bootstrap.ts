@@ -13,11 +13,11 @@ async function main() {
 
   if (args.length === 0) {
     console.error(
-      "Usage: run-tests [--watch|-w] <dir1> [dir2] [file.test.ts] ...",
+      "Usage: omni-diag [--watch|-w] <dir1> [dir2] [file.test.ts] ...",
     );
-    console.error("Example: run-tests src tests/integration");
-    console.error("Example: run-tests --watch src");
-    console.error("Example: run-tests src/myfile.test.ts");
+    console.error("Example: omni-diag src tests/integration");
+    console.error("Example: omni-diag --watch src");
+    console.error("Example: omni-diag src/myfile.test.ts");
     Deno.exit(1);
   }
 

@@ -21,7 +21,7 @@ import { Issue, IssueResponse, Spec, Rule } from "../utils/mod.ts";
 // ------------------- Main Project Spec -------------------
 
 const structure: Spec = {
-  src: ["#developed", "#undeveloped"],
+  src: ["#developed", "#undeveloped", "#tools"],
   deno: "json",
   design: "ts",
   tests: ["#developedTests", "#undevelopedTests"],
@@ -137,6 +137,14 @@ const macros: Macros = {
       artifacts: {
         "...": ["json", "mp3", "#folder"],
       },
+    },
+  },
+  tools: {
+    "...": {
+      bootstrap: "ts",
+      mod: "ts",
+      test: "ts",
+      "...": "#basic",
     },
   },
 
