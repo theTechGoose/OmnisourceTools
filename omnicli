@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec deno run -A --config=/Users/raphaelcastro/Documents/programming/OmnisourceTools/src/cli/deno.json /Users/raphaelcastro/Documents/programming/OmnisourceTools/src/cli/bootstrap.ts "$@"

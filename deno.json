@@ -2,5 +2,20 @@
   "name": "OmnisourceTools",
   "version": "0.0.1",
   "description": "A collection of tools for Omnisource projects.",
-  "workspace": []
+  "workspace": [
+    "./src/omni-diag",
+    "./src/cli",
+    "./src/tdoc",
+    "./src/sampler"
+  ],
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.14",
+    "class-transformer": "npm:class-transformer@^0.5.1",
+    "class-validator": "npm:class-validator@^0.14.2",
+    "reflect-metadata": "npm:reflect-metadata@^0.2.2"
+  }
 }

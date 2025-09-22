@@ -1,6 +1,6 @@
 // deno run --allow-run deno_lint.ts
 
-import { Issue, IssueResponse } from "../utils/mod.ts";
+import { Issue, IssueResponse } from "@/domain/data/types.ts";
 
 /**
  * Run `deno lint --json` on the given root.

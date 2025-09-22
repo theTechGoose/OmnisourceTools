@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run -A
-import { Issue, IssueResponse, Spec, Rule } from "../utils/mod.ts";
+import { Issue, IssueResponse, Spec, Rule } from "@/domain/data/types.ts";
 
 // deno-lint-ignore-file no-explicit-any
 
@@ -20,11 +20,38 @@ import { Issue, IssueResponse, Spec, Rule } from "../utils/mod.ts";
 
 // ------------------- Main Project Spec -------------------
 
+// Default structure for root-level projects
 const structure: Spec = {
-  src: ["#developed", "#undeveloped", "#tools"],
-  deno: "json",
-  design: "ts",
+  src: ["#developed", "#undeveloped"],
   tests: ["#developedTests", "#undevelopedTests"],
+  deno: "json",
+  CONTRIBUTING: "md",
+};
+
+// Structure for when we're checking a developed module directly
+const developedModuleStructure: Spec = {
+  bootstrap: "ts",
+  deno: "json",
+  domain: {
+    business: {
+      "...": ["#polymorphic", "#basic"],
+    },
+    data: {
+      "...": ["#polymorphic", "#basic", "@nopTests"],
+    },
+  },
+  routes: {
+    "...": {
+      internals: {
+        "...": "#basic",
+      },
+      entry: "ts",
+    },
+  },
+  dto: {
+    "...": "#basic",
+  },
+  mod: "ts",
 };
 
 // ------------------- Macros (basic & polymorphic included here) -------------------
@@ -33,7 +60,7 @@ type Macros = Record<string, Spec>;
 
 const macros: Macros = {
   basic: {
-    surface: {
+    "surface?": {
       "...": "#basic",
     },
     mod: "ts",
@@ -205,8 +232,26 @@ function filterSpec(obj: unknown): unknown {
  */
 export async function enforceStructure(
   root: string,
-  spec: Spec = structure,
+  spec?: Spec,
 ): Promise<IssueResponse> {
+  // Auto-detect if we're checking a developed module directly
+  if (!spec) {
+    try {
+      const hasBootstrap = await Deno.stat(pathJoin(root, "bootstrap.ts")).then(s => s.isFile).catch(() => false);
+      const hasDomain = await Deno.stat(pathJoin(root, "domain")).then(s => s.isDirectory).catch(() => false);
+      const hasSrc = await Deno.stat(pathJoin(root, "src")).then(s => s.isDirectory).catch(() => false);
+
+      // If we have bootstrap.ts and domain/, we're likely a developed module
+      if (hasBootstrap && hasDomain && !hasSrc) {
+        spec = developedModuleStructure;
+      } else {
+        spec = structure;
+      }
+    } catch {
+      spec = structure;
+    }
+  }
+
   const issues: Issue[] = [];
   await validateDirAgainstSpec(root, "", spec, issues);
 

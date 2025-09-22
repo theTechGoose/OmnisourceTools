@@ -45,6 +45,7 @@ async function runTest(file: string) {
   const curr = Deno.cwd();
   const path = join(curr, file);
   const envFile = await getEnvFile();
+  console.log(`Running tests in ${path} with env file ${envFile}`);
   const cmd = new Deno.Command("deno", {
     args: ["test", "-A", `--env-file=${envFile}`, path],
     stdout: "piped",
@@ -65,10 +66,10 @@ async function runTest(file: string) {
 
   for (let i = 0; i < full.length; i++) {
     const char = full[i];
-    const prevChar = i > 0 ? full[i - 1] : '';
+    const prevChar = i > 0 ? full[i - 1] : "";
 
     // Handle string boundaries
-    if ((char === '"' || char === "'") && prevChar !== '\\') {
+    if ((char === '"' || char === "'") && prevChar !== "\\") {
       if (!inString) {
         inString = true;
         quoteChar = char;
@@ -79,14 +80,14 @@ async function runTest(file: string) {
     }
 
     if (!inString) {
-      if (char === '{') {
+      if (char === "{") {
         if (braceCount === 0) {
           currentObj = "{";
         } else {
           currentObj += char;
         }
         braceCount++;
-      } else if (char === '}') {
+      } else if (char === "}") {
         braceCount--;
         currentObj += char;
 
@@ -109,7 +110,7 @@ async function runTest(file: string) {
   }
 
   console.log(`Found ${jsObjects.length} JS objects`);
-  return jsObjects.map(obj => [obj]);
+  return jsObjects.map((obj) => [obj]);
 }
 
 function parseMatch(match: string) {

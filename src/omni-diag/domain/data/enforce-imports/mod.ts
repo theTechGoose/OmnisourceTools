@@ -1,4 +1,4 @@
-import { Issue, IssueResponse } from "../utils/mod.ts";
+import { Issue, IssueResponse } from "@/domain/data/types.ts";
 // deno run --allow-run find_bad_imports.ts
 // ^ needs --allow-run because we invoke `grep`.
 
@@ -15,11 +15,26 @@ export function parseGrepOutput(grepOutput: string): Issue[] {
         };
       }
       const [, file, lineNum, content] = match;
+
+      // Check if this is an import within the same domain layer (e.g., domain/data)
+      const importMatch = content.match(/from\s+["'](\.\.[^"']+)["']/);
+      if (importMatch) {
+        const importPath = importMatch[1];
+        // Allow ../types.ts imports within domain/data or domain/business
+        if (
+          importPath === "../types.ts" &&
+          (file.includes("/domain/data/") || file.includes("/domain/business/"))
+        ) {
+          return null;
+        }
+      }
+
       return {
         issue: `Invalid relative import found: ${content.trim()}`,
         location: `${file}:${lineNum}`,
       };
-    });
+    })
+    .filter((issue): issue is Issue => issue !== null);
 }
 
 /**

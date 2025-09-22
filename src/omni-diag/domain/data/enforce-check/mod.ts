@@ -1,6 +1,6 @@
 // deno run --allow-run --allow-read deno_check.ts
 
-import { Issue, IssueResponse } from "../utils/mod.ts";
+import { Issue, IssueResponse } from "@/domain/data/types.ts";
 
 /**
  * Run `deno check` on all .ts files under the given root directory.

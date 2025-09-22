@@ -1,9 +1,9 @@
-import { enforceStructure } from "./enforce-dirs/mod.ts";
-import { runDenoCheck } from "./enforce-check/mod.ts";
-import { findInvalidRelativeImports } from "./enforce-imports/mod.ts";
-import { runDenoLint } from "./enforce-lint/mod.ts";
-import { runDenoTest } from "./enforce-test/mod.ts";
-import { Issue, getRoot } from "./utils/mod.ts";
+import { enforceStructure } from "@/domain/data/enforce-dirs/mod.ts";
+import { runDenoCheck } from "@/domain/data/enforce-check/mod.ts";
+import { findInvalidRelativeImports } from "@/domain/data/enforce-imports/mod.ts";
+import { runDenoLint } from "@/domain/data/enforce-lint/mod.ts";
+import { runDenoTest } from "@/domain/data/enforce-test/mod.ts";
+import { Issue, getRoot } from "@/domain/data/types.ts";
 
 async function main() {
   // Parse command line arguments
@@ -59,7 +59,8 @@ function logErrs(name: string, errs: Issue[], message: string) {
 
 async function runChecks(args: string[]): Promise<number> {
   // Get the root directory from deno.json for structure enforcement
-  const root = await getRoot(args[0]);
+  const firstArg = args[0] || ".";
+  const root = await getRoot(firstArg);
 
   // Run structure enforcement once from the root
   const structureErrs = await enforceStructure(root);
@@ -68,7 +69,7 @@ async function runChecks(args: string[]): Promise<number> {
   let errorCount = logErrs(
     structureErrs.name,
     structureErrs.issues,
-    structureErrs.message,
+    structureErrs.message || "",
   );
 
   const allErrs: any[] = [];
@@ -95,14 +96,14 @@ async function runChecks(args: string[]): Promise<number> {
     errorCount += logErrs(e.name, e.issues, e.message);
   }
 
-  const envFileMsg = errs[0].message;
+  const envFileMsg = errs[0]?.message || "";
   const envMsg = `Note: this only works for unit tests. ${envFileMsg}, for integration, e2e, and nop.test.ts files, please run them separately`;
 
   if (errorCount > 0) {
     console.log(
       `❌ Total issues found: ${errorCount}. Please fix the above issues. ${envMsg}`,
     );
-    return 0;
+    return 1;
   } else {
     console.log(`🎉 All checks passed! 🎉${envMsg}`);
     return 0;

@@ -1,0 +1,1 @@
+// No-op test file for enforce-dirs module

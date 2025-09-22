@@ -1,6 +1,6 @@
 // deno run --allow-run deno_test.ts
 
-import { getEnvFile, Issue, IssueResponse } from "../utils/mod.ts";
+import { getEnvFile, Issue, IssueResponse } from "@/domain/data/types.ts";
 
 /**
  * Run `deno test -A` on the given root.

@@ -1,13 +1,11 @@
-import { dirname, join } from "node:path";
+import { dirname, join } from "@std/path";
 
 export type Issue = { issue: string; location: string };
 export type Spec = string | string[] | { [name: string]: Spec };
-export type IssueResponse = { name: string; issues: Issue[]; message?: any };
+export type IssueResponse = { name: string; issues: Issue[]; message?: string };
 export type Rule = (path: string) => Promise<string | null> | string | null;
 
-// deno-lint-ignore-file no-explicit-any
-
-export async function getRoot(passedRoot = ".") {
+export async function getRoot(passedRoot = "."): Promise<string> {
   const absRoot = join(Deno.cwd(), passedRoot);
   const rootCandidate = await findNearestDenoJson(absRoot);
   const root = dirname(rootCandidate ?? absRoot);
@@ -24,12 +22,7 @@ export async function getEnvFile(_root: string) {
   }
   return join(root, "env", "local");
 }
-/**
- * Find the nearest parent deno.json file starting from `startDir`.
- *
- * @param startDir Directory to start searching from (default is current working directory).
- * @returns Absolute path to deno.json if found, otherwise null.
- */
+
 async function findNearestDenoJson(
   startDir: string = Deno.cwd(),
 ): Promise<string | null> {
@@ -57,12 +50,6 @@ async function findNearestDenoJson(
   return null;
 }
 
-// deno run --allow-read find_git_root.ts
-
-/**
- * Walk up from the given startDir until a `.git` folder is found.
- * Returns the absolute path to the Git root, or null if none found.
- */
 async function findGitRoot(startDir = Deno.cwd()): Promise<string | null> {
   let dir = startDir;
 
@@ -83,9 +70,4 @@ async function findGitRoot(startDir = Deno.cwd()): Promise<string | null> {
   }
 
   return null;
-}
-
-/** Example CLI usage */
-if (import.meta.main) {
-  console.log((await findGitRoot()) ?? "❌ No Git root found");
 }

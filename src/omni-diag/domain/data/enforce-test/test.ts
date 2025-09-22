@@ -1,6 +1,6 @@
 import { assertEquals } from "https://deno.land/std@0.208.0/assert/mod.ts";
 import { runDenoTest } from "./mod.ts";
-import { getEnvFile, Issue, IssueResponse } from "../utils/mod.ts";
+import { getEnvFile, Issue, IssueResponse } from "@/domain/data/types.ts";
 
 Deno.test("runDenoTest should return empty array when tests pass", async () => {
   // Create a temp directory with passing test

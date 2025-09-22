@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-run --allow-read --allow-write --allow-env --allow-net
+///////////// IMPORTANT, THIS IS THE LOGIC THAT NEEDS TO BE SPLIT UP GOD DAMN IT
 
 /**
  * Complete one-shot replacement for `deno_concat_ts` and `tdocs`.
@@ -808,7 +809,7 @@ footer .container::after {
       console.log(`Watching ${watchedFiles.length} files from the bundle...`);
 
       // Watch only the files that are included in the bundle
-      const watcher = Deno.watchFs(watchedFiles, { signal });
+      const watcher = Deno.watchFs(watchedFiles);
 
       try {
         for await (const event of watcher) {
