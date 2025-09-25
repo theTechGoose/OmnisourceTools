@@ -3,6 +3,7 @@ import { runDenoCheck } from "./enforce-check/mod.ts";
 import { findInvalidRelativeImports } from "./enforce-imports/mod.ts";
 import { runDenoLint } from "./enforce-lint/mod.ts";
 import { runDenoTest } from "./enforce-test/mod.ts";
+import { checkTestCoverage } from "./enforce-coverage/mod.ts";
 import { Issue, getRoot } from "./utils/mod.ts";
 
 async function main() {
@@ -79,11 +80,13 @@ async function runChecks(args: string[]): Promise<number> {
     const importErrs$ = findInvalidRelativeImports(path);
     const lintErrs$ = runDenoLint(path);
     const testErrs$ = runDenoTest(path);
+    const coverageErrs$ = checkTestCoverage(path);
     const errs = await Promise.all([
       testErrs$,
       checkErrs$,
       importErrs$,
       lintErrs$,
+      coverageErrs$,
     ]);
     allErrs.push(...errs);
   }

@@ -8,7 +8,7 @@ export type Rule = (path: string) => Promise<string | null> | string | null;
 // deno-lint-ignore-file no-explicit-any
 
 export async function getRoot(passedRoot = ".") {
-  const absRoot = join(Deno.cwd(), passedRoot);
+  const absRoot = passedRoot.startsWith("/") ? passedRoot : join(Deno.cwd(), passedRoot);
   const rootCandidate = await findNearestDenoJson(absRoot);
   const root = dirname(rootCandidate ?? absRoot);
   if (!root) {

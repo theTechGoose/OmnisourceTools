@@ -1,6 +1,4 @@
 #!/usr/bin/env deno run --no-check -A
-#!/usr/bin/env -S deno run --allow-run --allow-read --allow-write --allow-env --allow-net
-
 // deno:https://deno.land/std@0.224.0/path/_common/assert_path.ts
 function assertPath(path) {
   if (typeof path !== "string") {

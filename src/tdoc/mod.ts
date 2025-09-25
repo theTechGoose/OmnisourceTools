@@ -1,5 +1,3 @@
-#!/usr/bin/env -S deno run --allow-run --allow-read --allow-write --allow-env --allow-net
-
 /**
  * Complete one-shot replacement for `deno_concat_ts` and `tdocs`.
  * Now with file watching and hot reload support.

@@ -1,6 +1,9 @@
 import type { IssueResponse, Issue, Spec, Rule } from "../utils/mod.ts";
 import { structure, macros, rules } from "./specs.ts";
 
+// Debug flag - set DEBUG_VALIDATION=true environment variable to enable debug logging
+const DEBUG = Deno.env.get("DEBUG_VALIDATION") === "true";
+
 // Type for actual file system structure
 type FileSystemNode = {
   type: "file" | "directory";
@@ -227,59 +230,186 @@ async function validateNode(
   if (Array.isArray(spec)) {
     // Try each spec in the array
     let matched = false;
-    const tempIssues: Issue[] = [];
+    const tempIssuesBySpec: Array<{ spec: Spec; origSpec: Spec; issues: Issue[] }> = [];
 
     // Use original spec if available for better error messages
     const origArray = originalSpec && Array.isArray(originalSpec) ? originalSpec : spec;
+
+    // DEBUG: Log what we're validating
+    if (DEBUG && path.includes("domain/business")) {
+      console.log(`\n=== DEBUG: Validating ${path} ===`);
+      console.log(`Actual type: ${actual ? actual.type : 'undefined'}`);
+      if (actual && actual.type === 'directory' && actual.children) {
+        console.log(`Actual children: ${Array.from(actual.children.keys()).join(', ')}`);
+      }
+      console.log(`Spec options: ${origArray.map(s => typeof s === 'string' ? s : 'object').join(', ')}`);
+    }
 
     for (let i = 0; i < spec.length; i++) {
       const subSpec = spec[i];
       const origSubSpec = origArray[i];
       const subIssues: Issue[] = [];
+
+      // DEBUG: Log each spec attempt
+      if (DEBUG && path.includes("domain/business")) {
+        console.log(`\n  Trying spec option ${i}: ${typeof origSubSpec === 'string' ? origSubSpec : 'object'}`);
+        if (typeof subSpec === 'object' && !Array.isArray(subSpec)) {
+          console.log(`  Expanded spec keys: ${Object.keys(subSpec).join(', ')}`);
+        }
+      }
+
       await validateNode(subSpec, actual, path, subIssues, ruleDefinitions, origSubSpec);
+
+      // DEBUG: Log validation result
+      if (DEBUG && path.includes("domain/business")) {
+        console.log(`  Result: ${subIssues.length} issues`);
+        if (subIssues.length > 0) {
+          console.log(`  First few issues: ${subIssues.slice(0, 3).map(i => i.issue).join('; ')}`);
+        }
+      }
+
       if (subIssues.length === 0) {
         matched = true;
         break;
       }
-      tempIssues.push(...subIssues);
+      tempIssuesBySpec.push({ spec: subSpec, origSpec: origSubSpec, issues: subIssues });
     }
 
     if (!matched) {
-      const specDescriptions = origArray.map((s, index) => {
-        if (typeof s === "string") {
-          if (s.startsWith("@")) return `rule:${s.substring(1)}`;
-          if (s.startsWith("#")) return `macro:${s.substring(1)}`;
-          return `.${s}`;
+      // Find which spec has the fewest issues (closest match)
+      let minIssues = Infinity;
+      let closestIndex = 0;
+      tempIssuesBySpec.forEach((item, index) => {
+        if (item.issues.length < minIssues) {
+          minIssues = item.issues.length;
+          closestIndex = index;
         }
-        // For directory specs, try to provide more context
-        if (typeof s === "object" && !Array.isArray(s)) {
-          const keys = Object.keys(s).filter(k => k !== "...");
-          if (keys.length > 0) {
-            // Check what the expected children are
-            const childDescriptions = keys.slice(0, 3).map(k => {
-              const childSpec = s[k];
-              const keyName = k.replace('?', '');
-              if (Array.isArray(childSpec) && childSpec.length === 1 && typeof childSpec[0] === 'string' && !childSpec[0].startsWith('#') && !childSpec[0].startsWith('@')) {
-                // Single file extension in array means it's a file
-                return `${keyName}.${childSpec[0]}`;
-              } else if (typeof childSpec === 'string' && !childSpec.startsWith('#') && !childSpec.startsWith('@')) {
-                // Direct string means file extension
-                return `${keyName}.${childSpec}`;
-              }
-              return keyName;
-            });
-            return `directory containing [${childDescriptions.join(", ")}${keys.length > 3 ? ", ..." : ""}]`;
-          }
-        }
-        return `directory`;
       });
 
-      if (!actual) {
+      // Generate detailed message for the closest matching spec
+      const closestSpec = origArray[closestIndex];
+      const closestIssues = tempIssuesBySpec[closestIndex].issues;
+
+      let mainDescription = "";
+      if (typeof closestSpec === "string" && closestSpec.startsWith("#")) {
+        const macroName = closestSpec.substring(1);
+        mainDescription = `Closest match: macro:${macroName}\n`;
+
+        // Group issues by location for better readability
+        const issuesByLocation = new Map<string, string[]>();
+        for (const issue of closestIssues) {
+          const relPath = issue.location.replace(path + "/", "");
+          if (!issuesByLocation.has(relPath)) {
+            issuesByLocation.set(relPath, []);
+          }
+
+          // Make issue descriptions very specific
+          let simpleIssue = issue.issue;
+
+          // Parse the original issue to extract specific expectations
+          if (issue.issue.includes("Expected file with extension")) {
+            const extMatch = issue.issue.match(/Expected file with extension \.([\w.]+)/);
+            const foundMatch = issue.issue.match(/but found \.([\w.]+|no extension)/);
+            if (extMatch) {
+              const expectedExt = extMatch[1];
+              const fileName = relPath.split('/').pop();
+              if (foundMatch && foundMatch[1] !== "no extension") {
+                simpleIssue = `expected: ${fileName}.${expectedExt}, found: ${fileName}.${foundMatch[1]}`;
+              } else if (issue.issue.includes("but found directory")) {
+                simpleIssue = `expected: ${fileName}.${expectedExt} (file), found: ${fileName}/ (directory)`;
+              } else {
+                simpleIssue = `expected: ${fileName}.${expectedExt}, found: nothing`;
+              }
+            }
+          } else if (issue.issue.includes("Expected directory")) {
+            const dirName = relPath.split('/').pop();
+            if (issue.issue.includes("but found file")) {
+              simpleIssue = `expected: ${dirName}/ (directory), found: ${dirName} (file)`;
+            } else {
+              simpleIssue = `expected: ${dirName}/ (directory), found: nothing`;
+            }
+          } else if (issue.issue.includes("Unexpected file")) {
+            simpleIssue = `unexpected file (should not exist)`;
+          } else if (issue.issue.includes("Unexpected directory")) {
+            simpleIssue = `unexpected directory (should not exist)`;
+          } else if (issue.issue.includes("Does not match any of:")) {
+            // Extract what patterns were expected
+            const patternsMatch = issue.issue.match(/Does not match any of: (.+)/);
+            if (patternsMatch) {
+              const patterns = patternsMatch[1];
+              // Check if actual exists to provide better context
+              if (actual) {
+                simpleIssue = `found: ${actual.type === 'file' ? `file (${actual.extension || 'no ext'})` : 'directory'}, expected one of: ${patterns}`;
+              } else {
+                simpleIssue = `found: nothing, expected one of: ${patterns}`;
+              }
+            }
+          } else if (issue.issue.includes("Expected one of:")) {
+            const patternsMatch = issue.issue.match(/Expected one of: (.+)/);
+            if (patternsMatch) {
+              simpleIssue = `expected one of: ${patternsMatch[1]}, found: nothing`;
+            }
+          }
+
+          issuesByLocation.get(relPath)!.push(simpleIssue);
+        }
+
+        // Format issues by location
+        const formattedIssues: string[] = [];
+        for (const [loc, issues] of issuesByLocation.entries()) {
+          formattedIssues.push(`  ${loc}: ${issues.join("; ")}`);
+        }
+
+        if (formattedIssues.length > 0) {
+          mainDescription += "Issues:\n" + formattedIssues.join("\n");
+        }
+
+        // Show what the other options were
+        const otherOptions = origArray
+          .filter((_, i) => i !== closestIndex)
+          .map(s => {
+            if (typeof s === "string" && s.startsWith("#")) {
+              return `macro:${s.substring(1)}`;
+            } else if (typeof s === "string" && s.startsWith("@")) {
+              return `rule:${s.substring(1)}`;
+            }
+            return "custom pattern";
+          });
+
+        if (otherOptions.length > 0) {
+          mainDescription += `\n\nOther options tried: ${otherOptions.join(", ")}`;
+        }
+
         issues.push({
-          issue: `Expected one of: ${specDescriptions.join(", ")}`,
+          issue: mainDescription,
           location: path,
         });
       } else {
+        // Fallback to original behavior for non-macro specs
+        const specDescriptions = origArray.map((s, index) => {
+          const specIssues = tempIssuesBySpec[index]?.issues || [];
+          let description = "";
+
+          if (typeof s === "string") {
+            if (s.startsWith("@")) {
+              description = `rule:${s.substring(1)}`;
+            } else if (s.startsWith("#")) {
+              description = `macro:${s.substring(1)}`;
+            } else {
+              description = `.${s}`;
+            }
+          } else {
+            description = "pattern";
+          }
+
+          // Add issue count for each option
+          if (specIssues.length > 0) {
+            description += ` (${specIssues.length} issues)`;
+          }
+
+          return description;
+        });
+
         issues.push({
           issue: `Does not match any of: ${specDescriptions.join(", ")}`,
           location: path,
@@ -311,6 +441,11 @@ async function validateNode(
     const processedChildren = new Set<string>();
 
     for (const [key, childSpec] of Object.entries(spec)) {
+      // DEBUG logging for business directories
+      if (DEBUG && path.includes("domain/business") && !path.includes("/unit")) {
+        console.log(`  Checking key '${key}' with spec: ${Array.isArray(childSpec) ? `[${childSpec}]` : typeof childSpec}`);
+      }
+
       if (key === "...") {
         // Wildcard - validate all children against this spec
         for (const [childName, childNode] of children) {
@@ -376,6 +511,34 @@ async function validateNode(
           childNode = children.get(withExt);
           if (childNode) {
             usedName = withExt;
+          }
+        }
+
+        // If not found and spec is an array of extensions, try each one
+        if (!childNode && Array.isArray(childSpec)) {
+          // DEBUG
+          if (DEBUG && path.includes("domain/business") && key === "unit") {
+            console.log(`  Looking for files with base '${key}' and extensions: ${childSpec}`);
+            console.log(`  Available children: ${Array.from(children.keys())}`);
+          }
+
+          // For arrays like ["test.ts", "nop.test.ts"], we need to check if any matching file exists
+          for (const ext of childSpec) {
+            if (typeof ext === "string" && !ext.startsWith("#") && !ext.startsWith("@")) {
+              const possibleName = `${key}.${ext}`;
+              const foundChild = children.get(possibleName);
+
+              // DEBUG
+              if (DEBUG && path.includes("domain/business") && key === "unit") {
+                console.log(`    Checking for '${possibleName}': ${foundChild ? 'found' : 'not found'}`);
+              }
+
+              if (foundChild) {
+                childNode = foundChild;
+                usedName = possibleName;
+                break;
+              }
+            }
           }
         }
 

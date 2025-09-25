@@ -50,7 +50,18 @@ export async function runDenoLint(root = "src"): Promise<IssueResponse> {
   }
 
   const issues: Issue[] = [];
-  if (Array.isArray(results)) {
+
+  // Handle new deno lint JSON format (object with diagnostics array)
+  if (results && typeof results === 'object' && 'diagnostics' in results) {
+    for (const d of results.diagnostics ?? []) {
+      issues.push({
+        issue: `[${d.code}] ${d.message}`,
+        location: `${d.filename}:${d.range.start.line}:${d.range.start.col}`,
+      });
+    }
+  }
+  // Handle old format (array of files with diagnostics)
+  else if (Array.isArray(results)) {
     for (const file of results) {
       for (const d of file.diagnostics ?? []) {
         issues.push({

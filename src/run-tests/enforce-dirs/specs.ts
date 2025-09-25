@@ -7,11 +7,15 @@ const structure: Spec = {
   deno: "json",
   design: "ts",
   tests: ["#developedTests", "#undevelopedTests"],
+  "client?": "ts",
+  "assets?": "#folder",
+  "vite.config?": "ts",
+  ".vite?": "#folder",
 };
 
 const macros: Macros = {
   basic: {
-    surface: {
+    "surface?": {
       "...": "#basic",
     },
     mod: "ts",
@@ -26,10 +30,10 @@ const macros: Macros = {
     mod: "ts",
   },
   folder: {
-    "...": ["json", "mp3"],
+    "...": ["json", "mp3", "html", "css"],
   },
   developed: {
-    bootstrap: ["ts"],
+    bootstrap: "ts",
     "...": {
       domain: {
         business: {
@@ -41,20 +45,20 @@ const macros: Macros = {
       },
       routes: {
         "...": {
-          internals: {
+          "surface?": {
             "...": "#basic",
           },
           entry: "ts",
         },
       },
-      dto: {
+      "dto?": {
         "...": "#basic",
       },
       mod: "ts",
     },
   },
   undeveloped: {
-    bootstrap: ["ts"],
+    bootstrap: "ts",
     domain: {
       business: {
         "...": ["#polymorphic", "#basic"],
@@ -63,37 +67,40 @@ const macros: Macros = {
         "...": ["#polymorphic", "#basic", "@nopTests"],
       },
     },
-    routes: {
+    "routes?": {
       "...": {
-        internals: {
+        "surface?": {
           "...": "#basic",
         },
         entry: "ts",
       },
     },
-    dto: {
+    "dto?": {
       "...": "#basic",
     },
   },
 
   developedTests: {
-    examples: {
+    "examples?": {
       "...": ["#basic", "@nopTests"],
-      artifacts: ["#folder"],
+      "artifacts?": ["#folder"],
     },
     "e2e?": {
       surface: {
-        "...": ["e2e.ts"],
+        "...": ["e2e.test.ts", "int.test.ts"],
       },
       artifacts: {
         "...": ["json", "mp3", "#folder"],
       },
     },
-    integration: {
+    "integration?": {
       surface: {
-        "...": ["integration.ts"],
+        "...": ["int.test.ts", "e2e.test.ts"],
       },
-      artifacts: {
+      "artifacts?": {
+        "...": ["json", "mp3", "#folder"],
+      },
+      "fixtures?": {
         "...": ["json", "mp3", "#folder"],
       },
     },
@@ -108,9 +115,9 @@ const macros: Macros = {
     },
     "integration?": {
       surface: {
-        "...": ["integration.ts"],
+        "...": ["int.test.ts", "e2e.test.ts"],
       },
-      artifacts: {
+      "artifacts?": {
         "...": ["json", "mp3", "#folder"],
       },
     },
@@ -145,4 +152,3 @@ function pathJoin(...parts: string[]): string {
 
 export { structure, macros, rules };
 export type { Macros, Rules };
-

@@ -2,12 +2,6 @@
   "name": "OmnisourceTools",
   "version": "0.0.1",
   "description": "A collection of tools for Omnisource projects.",
-  "workspace": [
-    "./src/omni-diag",
-    "./src/cli",
-    "./src/tdoc",
-    "./src/sampler"
-  ],
   "compilerOptions": {
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true

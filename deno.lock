@@ -1,37 +1,13 @@
 {
   "version": "5",
   "specifiers": {
-    "jsr:@std/assert@1": "1.0.14",
-    "jsr:@std/assert@^1.0.14": "1.0.14",
-    "jsr:@std/internal@^1.0.10": "1.0.10",
-    "jsr:@std/path@1": "1.1.2",
     "npm:@types/node@*": "24.2.0",
     "npm:charsm@0.2.0": "0.2.0",
     "npm:class-transformer@*": "0.5.1",
     "npm:class-transformer@~0.5.1": "0.5.1",
-    "npm:class-validator@*": "0.14.2",
-    "npm:class-validator@~0.14.1": "0.14.2",
-    "npm:class-validator@~0.14.2": "0.14.2",
     "npm:quicktype-core@*": "23.2.6",
     "npm:reflect-metadata@*": "0.2.2",
     "npm:reflect-metadata@~0.2.2": "0.2.2"
-  },
-  "jsr": {
-    "@std/assert@1.0.14": {
-      "integrity": "68d0d4a43b365abc927f45a9b85c639ea18a9fab96ad92281e493e4ed84abaa4",
-      "dependencies": [
-        "jsr:@std/internal"
-      ]
-    },
-    "@std/internal@1.0.10": {
-      "integrity": "e3be62ce42cab0e177c27698e5d9800122f67b766a0bea6ca4867886cbde8cf7"
-    },
-    "@std/path@1.1.2": {
-      "integrity": "c0b13b97dfe06546d5e16bf3966b1cadf92e1cc83e56ba5476ad8b498d9e3038",
-      "dependencies": [
-        "jsr:@std/internal"
-      ]
-    }
   },
   "npm": {
     "@glideapps/ts-necessities@2.2.3": {
@@ -64,9 +40,6 @@
       "dependencies": [
         "undici-types"
       ]
-    },
-    "@types/validator@13.15.2": {
-      "integrity": "sha512-y7pa/oEJJ4iGYBxOpfAKn5b9+xuihvzDVnC/OSvlVnGxVg0pOqmjiMafiJ1KVNQEaPZf9HsEp5icEwGg8uIe5Q=="
     },
     "@yuuang/ffi-rs-android-arm64@1.3.0": {
       "integrity": "sha512-1kO6gmoDwZVlEzqbWXkQke8WLGAECOAAjTNBjphPN1sn+ICdUGBfR7TKHMbygspGXpFUFFI7/H75l3Gt8QsaLQ==",
@@ -154,14 +127,6 @@
     "class-transformer@0.5.1": {
       "integrity": "sha512-SQa1Ws6hUbfC98vKGxZH3KFY0Y1lm5Zm0SY8XX9zbK7FJCyVEac3ATW0RIpwzW+oOfmHE5PMPufDG9hCfoEOMw=="
     },
-    "class-validator@0.14.2": {
-      "integrity": "sha512-3kMVRF2io8N8pY1IFIXlho9r8IPUUIfHe2hYVtiebvAzU2XeQFXTv+XI4WX+TnXmtwXMDcjngcpkiPM0O9PvLw==",
-      "dependencies": [
-        "@types/validator",
-        "libphonenumber-js",
-        "validator"
-      ]
-    },
     "collection-utils@1.0.1": {
       "integrity": "sha512-LA2YTIlR7biSpXkKYwwuzGjwL5rjWEZVOSnvdUc7gObvWe4WkjxOpfrdhoP7Hs09YWDVfg0Mal9BpAqLfVEzQg=="
     },
@@ -222,9 +187,6 @@
     },
     "js-base64@3.7.8": {
       "integrity": "sha512-hNngCeKxIUQiEUN3GPJOkz4wF/YvdUdbNL9hsBcMQTkKzboD7T/q3OYOuuPZLUE6dBxSGpwhk5mwuDud7JVAow=="
-    },
-    "libphonenumber-js@1.12.14": {
-      "integrity": "sha512-HBAMAV7f3yGYy7ZZN5FxQ1tXJTwC77G5/96Yn/SH/HPyKX2EMLGFuCIYUmdLU7CxxJlQcvJymP/PGLzyapurhQ=="
     },
     "lodash@4.17.21": {
       "integrity": "sha512-v2kDEe57lecTulaDIuNTPy3Ry4gLGJ6Z1O3vE1krgXZNrsQ+LFTGHVxVjcXPs17LhbZVGedAJv8XZ1tvj5FvSg=="
@@ -332,9 +294,6 @@
     },
     "urijs@1.19.11": {
       "integrity": "sha512-HXgFDgDommxn5/bIv0cnQZsPhHDA90NPHD6+c/v21U5+Sx5hoP8+dP9IZXBU1gIfvdRfhG8cel9QNPeionfcCQ=="
-    },
-    "validator@13.15.15": {
-      "integrity": "sha512-BgWVbCI72aIQy937xbawcs+hrVaN/CZ2UwutgaJ36hGqRrLNM+f5LUT/YPRbo8IV/ASeFzXszezV+y2+rq3l8A=="
     },
     "webidl-conversions@3.0.1": {
       "integrity": "sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ=="
@@ -444,6 +403,19 @@
     "https://cdn.skypack.dev/class-transformer@0.5.1?dts": "8dbb08f1a9b1af66e2097885f15d83550260abd4f668774c953ce797694f0cbb",
     "https://cdn.skypack.dev/class-validator@0.14.0?dts": "9908887cef31a72d859a8d90b94266580f6bc517a2c721ad5c0ab89f6998c409",
     "https://cdn.skypack.dev/reflect-metadata@0.1.13?dts": "981067f7fd991816f4954d6f7f8785c629dd58f050f69ef453c1db0890e26938",
+    "https://deno.land/std@0.190.0/_util/asserts.ts": "178dfc49a464aee693a7e285567b3d0b555dc805ff490505a8aae34f9cfb1462",
+    "https://deno.land/std@0.190.0/_util/os.ts": "d932f56d41e4f6a6093d56044e29ce637f8dcc43c5a90af43504a889cf1775e3",
+    "https://deno.land/std@0.190.0/fs/_util.ts": "579038bebc3bd35c43a6a7766f7d91fbacdf44bc03468e9d3134297bb99ed4f9",
+    "https://deno.land/std@0.190.0/fs/walk.ts": "920be35a7376db6c0b5b1caf1486fb962925e38c9825f90367f8f26b5e5d0897",
+    "https://deno.land/std@0.190.0/path/_constants.ts": "e49961f6f4f48039c0dfed3c3f93e963ca3d92791c9d478ac5b43183413136e0",
+    "https://deno.land/std@0.190.0/path/_interface.ts": "6471159dfbbc357e03882c2266d21ef9afdb1e4aa771b0545e90db58a0ba314b",
+    "https://deno.land/std@0.190.0/path/_util.ts": "d7abb1e0dea065f427b89156e28cdeb32b045870acdf865833ba808a73b576d0",
+    "https://deno.land/std@0.190.0/path/common.ts": "ee7505ab01fd22de3963b64e46cff31f40de34f9f8de1fff6a1bd2fe79380000",
+    "https://deno.land/std@0.190.0/path/glob.ts": "d479e0a695621c94d3fd7fe7abd4f9499caf32a8de13f25073451c6ef420a4e1",
+    "https://deno.land/std@0.190.0/path/mod.ts": "ee161baec5ded6510ee1d1fb6a75a0f5e4b41f3f3301c92c716ecbdf7dae910d",
+    "https://deno.land/std@0.190.0/path/posix.ts": "8b7c67ac338714b30c816079303d0285dd24af6b284f7ad63da5b27372a2c94d",
+    "https://deno.land/std@0.190.0/path/separator.ts": "0fb679739d0d1d7bf45b68dacfb4ec7563597a902edbaf3c59b50d5bcadd93b1",
+    "https://deno.land/std@0.190.0/path/win32.ts": "d186344e5583bcbf8b18af416d13d82b35a317116e6460a5a3953508c3de5bba",
     "https://deno.land/std@0.196.0/assert/assert.ts": "9a97dad6d98c238938e7540736b826440ad8c1c1e54430ca4c4e623e585607ee",
     "https://deno.land/std@0.196.0/assert/assertion_error.ts": "4d0bde9b374dfbcbe8ac23f54f567b77024fb67dbb1906a852d67fe050d42f56",
     "https://deno.land/std@0.196.0/console/_data.json": "cf2cc9d039a192b3adbfe64627167c7e6212704c888c25c769fc8f1709e1e1b8",
@@ -819,33 +791,6 @@
       "npm:class-transformer@~0.5.1",
       "npm:class-validator@~0.14.2",
       "npm:reflect-metadata@~0.2.2"
-    ],
-    "members": {
-      "src/cli": {
-        "dependencies": [
-          "npm:class-transformer@~0.5.1",
-          "npm:class-validator@~0.14.2",
-          "npm:reflect-metadata@~0.2.2"
-        ]
-      },
-      "src/omni-diag": {
-        "dependencies": [
-          "jsr:@std/assert@1",
-          "jsr:@std/path@1",
-          "npm:class-transformer@~0.5.1",
-          "npm:class-validator@~0.14.1",
-          "npm:reflect-metadata@~0.2.2"
-        ]
-      },
-      "src/sampler": {
-        "dependencies": [
-          "jsr:@std/assert@1",
-          "jsr:@std/path@1",
-          "npm:class-transformer@~0.5.1",
-          "npm:class-validator@~0.14.1",
-          "npm:reflect-metadata@~0.2.2"
-        ]
-      }
-    }
+    ]
   }
 }
