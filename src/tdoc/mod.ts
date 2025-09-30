@@ -292,7 +292,40 @@ if (import.meta.main) {
   // Function to build documentation
   const buildDocs = async () => {
     const outts = join(tmpdir, "concat.ts");
-    const includedFiles = await concat(entry, outts);
+    let includedFiles = await concat(entry, outts);
+
+    function stripImportsAndDecoratorCalls(source: string): string {
+      let out: string = source;
+
+      // 1) Remove ALL decorators:
+      //    - @Dec
+      //    - @Dec()
+      //    - @ns.Dec(arg1, arg2)
+      //    - Allows whitespace/newlines inside the parens
+      // Note: This is intentionally regex-based and does not try to balance nested parens.
+      out = out.replace(
+        /@\s*[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*(?:\([\s\S]*?\))?/g,
+        "",
+      );
+
+      // 2) Remove ALL static import statements (including multi-line):
+      //    - import ... from 'x';
+      //    - import 'x';
+      //    - import {
+      //        a,
+      //        b
+      //      } from 'x';
+      //    - import type { Foo } from 'x';
+      // Pass 1: anything starting with "import" up to the next semicolon
+      out = out.replace(/^[ \t]*import[\s\S]*?;[ \t]*\r?\n?/gm, "");
+
+      // Pass 2: imports that might not end with a semicolon (rare but valid) — remove the line
+      out = out.replace(/^[ \t]*import\s+['"][^'"]+['"][ \t]*\r?\n?/gm, "");
+
+      return out;
+    }
+    includedFiles = includedFiles.map(stripImportsAndDecoratorCalls);
+
     watchedFiles = includedFiles;
     return outts;
   };
