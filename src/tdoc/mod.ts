@@ -63,8 +63,7 @@ async function concat(entry: string, outPath: string): Promise<string[]> {
     const m = bySpec.get(spec);
     if (!m) return;
     for (const d of m.dependencies ?? []) {
-      const child =
-        d.code?.specifier ??
+      const child = d.code?.specifier ??
         d.type?.specifier ??
         d.maybeCode?.specifier ??
         d.specifier;
@@ -74,8 +73,9 @@ async function concat(entry: string, outPath: string): Promise<string[]> {
   }
 
   for (const r of graph.roots ?? []) visit(r);
-  if (order.length === 0 && graph.modules?.[0])
+  if (order.length === 0 && graph.modules?.[0]) {
     visit(graph.modules[0].specifier);
+  }
 
   const includeRemote = Deno.env.get("INCLUDE_REMOTE") === "1";
   const includeJs = Deno.env.get("INCLUDE_JS") === "1";
@@ -271,7 +271,7 @@ if (import.meta.main) {
     (arg) => arg !== "--no-wait" && arg !== "--watch",
   );
 
-  const entry = filteredArgs[0] ?? "./sketch.ts";
+  const entry = filteredArgs[0] ?? "./design.ts";
   // Use /tmp/tdoc as the base directory
   const tmpdir = "/tmp/tdoc";
   const docsOutputDir = join(tmpdir, "typedoc");
@@ -638,8 +638,7 @@ footer .container::after {
             ${readmeHtml}
           </div>
         `;
-        indexContent =
-          indexContent.slice(0, insertPos) +
+        indexContent = indexContent.slice(0, insertPos) +
           readmeSection +
           indexContent.slice(insertPos);
         await Deno.writeTextFile(indexPath, indexContent);
@@ -720,8 +719,7 @@ footer .container::after {
       }
 
       if (insertionPoint > -1) {
-        indexContent =
-          indexContent.slice(0, insertionPoint) +
+        indexContent = indexContent.slice(0, insertionPoint) +
           entrypointsHtml +
           indexContent.slice(insertionPoint);
 
@@ -812,7 +810,7 @@ footer .container::after {
         for await (const event of watcher) {
           // Check if any of the changed files are in our watched list
           const relevantChange = event.paths.some((path) =>
-            watchedFiles.includes(path),
+            watchedFiles.includes(path)
           );
 
           if (!relevantChange) continue;
