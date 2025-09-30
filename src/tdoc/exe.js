@@ -283,6 +283,14 @@ var badgeConfig = {
   "@lib/recordings": "![pill](https://img.shields.io/badge/Lib-Recordings-FF746C)<br>",
   "@lib/transcription": "![pill](https://img.shields.io/badge/Lib-Transcription-26c6da)<br>"
 };
+function stripImportsAndDecoratorCalls(source) {
+  let out = source;
+  const importRegex = /^\s*import\s*(?:type\s+)?(?:\s*\{[\s\S]*?\}|\s+[\w$]+|\s*\*\s+as\s+[\w$]+|\s+[\w$]+\s*,\s*\{[\s\S]*?\})\s*from\s*["'][^"']+["']\s*;?\s*(?:\/\/[^\n]*)?\s*$/gm;
+  out = out.split(importRegex).join("");
+  const decoratorRegex = /^\s*@[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*\([^()\n]*\))?\s*$/gm;
+  out = out.split(decoratorRegex).join("");
+  return out;
+}
 async function concat(entry, outPath) {
   const command = new Deno.Command("deno", {
     args: [
@@ -315,7 +323,9 @@ async function concat(entry, outPath) {
     order.push(spec);
   }
   for (const r of graph.roots ?? []) visit(r);
-  if (order.length === 0 && graph.modules?.[0]) visit(graph.modules[0].specifier);
+  if (order.length === 0 && graph.modules?.[0]) {
+    visit(graph.modules[0].specifier);
+  }
   const includeRemote = Deno.env.get("INCLUDE_REMOTE") === "1";
   const includeJs = Deno.env.get("INCLUDE_JS") === "1";
   const mediaOk = /* @__PURE__ */ new Set([
@@ -354,6 +364,7 @@ async function concat(entry, outPath) {
       out += src + "\n";
     } catch {
     }
+    out = stripImportsAndDecoratorCalls(out);
   }
   const removedImports = out.split("\n").map((line) => line.includes("import") ? "" : line).filter(Boolean).join("\n");
   let withBadges = removedImports;
@@ -484,13 +495,10 @@ if (import.meta.main) {
   const shouldWait = !Deno.args.includes("--no-wait");
   const watchMode = Deno.args.includes("--watch");
   const filteredArgs = Deno.args.filter((arg) => arg !== "--no-wait" && arg !== "--watch");
-  const entry = filteredArgs[0] ?? "./sketch.ts";
+  const entry = filteredArgs[0] ?? "./design.ts";
   const tmpdir = "/tmp/tdoc";
   const docsOutputDir = join3(tmpdir, "typedoc");
   try {
-    await Deno.remove(tmpdir, {
-      recursive: true
-    });
   } catch {
   }
   await Deno.mkdir(tmpdir, {
@@ -503,7 +511,7 @@ if (import.meta.main) {
   let watchedFiles = [];
   const buildDocs = async () => {
     const outts2 = join3(tmpdir, "concat.ts");
-    const includedFiles = await concat(entry, outts2);
+    let includedFiles = await concat(entry, outts2);
     watchedFiles = includedFiles;
     return outts2;
   };
@@ -795,9 +803,6 @@ ${mermaidEnd}`;
   };
   const buildSuccess = await rebuildAndProcess();
   if (!buildSuccess) {
-    await Deno.remove(tmpdir, {
-      recursive: true
-    });
     Deno.exit(1);
   }
   let wsServer = null;
@@ -924,9 +929,6 @@ ${mermaidEnd}`;
     console.log("Stopped WebSocket server");
   }
   try {
-    await Deno.remove(tmpdir, {
-      recursive: true
-    });
     console.log(`Removed debug directory: ${tmpdir}`);
   } catch (e) {
     console.error(`Failed to remove ${tmpdir}:`, e);
