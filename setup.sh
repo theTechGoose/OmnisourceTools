@@ -1,48 +1,57 @@
-#!/bin/bash
+last_colon_field() {
+  s=${1%:}                # drop one trailing ":" if present
+  printf '%s\n' "${s##*:}"
+}
 
-# ╔═══════════════════════════════════════════════════════════════╗
-# ║              OMNISOURCE UNIVERSAL BUILD SYSTEM                ║
-# ║                 Forge Your Tools Into Reality                 ║
-# ╚═══════════════════════════════════════════════════════════════╝
+# Usage:
+#   slash_field PATH [INDEX]
+# INDEX:
+#   -1 -> last, -2 -> second from last, ...
+#    0 -> last, 1 -> second from last (backwards-compatible)
 
-NAME=${1:-$(basename "$PWD")}
-ENTRY=${2:-bootstrap.ts}
+slash_field() {
+  [ $# -ge 1 ] || { printf 'usage: slash_field PATH [INDEX]\n' >&2; return 2; }
 
-echo ""
-echo "⚡ === OMNISOURCE TOOL FORGE === ⚡"
-echo ""
-echo "🔨 Forging: $NAME"
-echo "📜 Source: $ENTRY"
-echo ""
+  p=$1
+  idx=${2:-0}
 
-echo "🔥 Bundling TypeScript into executable..."
-(echo '#!/usr/bin/env deno run -A'; deno bundle "$ENTRY") > exe.js
+  # Validate integer (allows optional leading '-')
+  case $idx in
+    ''|'-'|*[!0-9-]*) printf 'index must be an integer\n' >&2; return 2;;
+  esac
 
-if [ $? -ne 0 ]; then
-    echo "❌ Build failed! Check your TypeScript code."
-    exit 1
-fi
+  # Map negative indices to "from-end" offset:
+  #  -1 -> 0, -2 -> 1, etc.
+  if [ "$idx" -lt 0 ]; then
+    idx=$(( -idx - 1 ))
+  fi
 
-echo "⚙️  Setting execution permissions..."
-chmod +x exe.js
+  # Strip trailing slashes (unless the path is just "/")
+  while [ "$p" != "/" ] && [ "${p%/}" != "$p" ]; do p=${p%/}; done
+  [ -z "$p" ] && p="."
 
-echo "🚀 Deploying to ~/.local/bin/$NAME..."
-mkdir -p ~/.local/bin
-cp ./exe.js ~/.local/bin/$NAME
+  i=0
+  while :; do
+    comp=${p##*/}                # last component
+    [ -z "$comp" ] && comp="/"   # handle "/"
 
-echo ""
-echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║                  🌟 BUILD SUCCESSFUL! 🌟                      ║"
-echo "╠════════════════════════════════════════════════════════════════╣"
-echo "║  Tool Name: $NAME"
-echo "║  Installed: ~/.local/bin/$NAME"
-echo "║  Entry Point: $ENTRY"
-echo "╠════════════════════════════════════════════════════════════════╣"
-echo "║  Pro Tips:                                                    ║"
-echo "║  • Ensure ~/.local/bin is in your PATH                        ║"
-echo "║  • Run '$NAME --help' for usage info                          ║"
-echo "║  • Rebuild anytime with: ./setup.sh $NAME                     ║"
-echo "╚════════════════════════════════════════════════════════════════╝"
-echo ""
-echo "💪 Another tool forged in the OmniSource crucible!"
-echo ""
+    if [ "$i" -eq "$idx" ]; then
+      printf '%s\n' "$comp"
+      return 0
+    fi
+
+    parent=${p%/*}
+    [ "$parent" = "$p" ] && break
+    p=$parent
+    i=$((i+1))
+  done
+  printf 'index out of range\n' >&2
+  return 1
+}
+BIN_PATH="$(pwd)/$(dirname -- $1)/exe.js"
+(echo '#!/usr/bin/env deno run --no-check -A'; deno bundle $1) > "$BIN_PATH"
+chmod +x "$BIN_PATH"
+BIN_DIR=$(last_colon_field $PATH)
+FULL_PATH="$BIN_DIR/$(slash_field $1 -1)"
+echo "Linking $FULL_PATH"
+cp "$BIN_PATH"  "$FULL_PATH"

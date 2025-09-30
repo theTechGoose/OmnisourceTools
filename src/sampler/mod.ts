@@ -1,8 +1,8 @@
-import { relative, join } from "node:path";
+import { join, relative } from "node:path";
 import {
-  quicktype,
   InputData,
   jsonInputForTargetLanguage,
+  quicktype,
 } from "npm:quicktype-core";
 
 async function jsonToTsInterfaces(json: string, i: number) {
@@ -165,15 +165,18 @@ if (import.meta.main) {
     }),
   );
   if (!artifactsFolder) throw new Error("artifacts folder not found");
-  const parentFolderName = getParentFolderName();
+  let parentFolderName = getParentFolderName();
+  parentFolderName = `sample-${parentFolderName}`;
   const outFolder = join(artifactsFolder, parentFolderName || "default");
   Deno.mkdirSync(outFolder, { recursive: true });
   Deno.writeTextFileSync(
     outFolder + "/output.json",
-    `[\n${parsedWithTypes
-      .map((i) => JSON.parse(i.json!))
-      .map((obj) => JSON.stringify(obj, null, 2))
-      .join(",\n")}\n]`,
+    `[\n${
+      parsedWithTypes
+        .map((i) => JSON.parse(i.json!))
+        .map((obj) => JSON.stringify(obj, null, 2))
+        .join(",\n")
+    }\n]`,
   );
   Deno.writeTextFileSync(
     outFolder + "/types.ts",
