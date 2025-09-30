@@ -39,6 +39,16 @@ interface DenoGraph {
   modules: DenoModule[];
 }
 
+function stripImportsAndDecoratorCalls(source: string): string {
+  let out: string = source;
+  const importRegex =
+    /^\s*import\s*(?:type\s+)?(?:\s*\{[\s\S]*?\}|\s+[\w$]+|\s*\*\s+as\s+[\w$]+|\s+[\w$]+\s*,\s*\{[\s\S]*?\})\s*from\s*["'][^"']+["']\s*;?\s*(?:\/\/[^\n]*)?\s*$/gm;
+  out = out.split(importRegex).join("");
+  const decoratorRegex =
+    /^\s*@[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*\([^()\n]*\))?\s*$/gm;
+  out = out.split(decoratorRegex).join("");
+  return out;
+}
 // ---------- concat function ----------
 async function concat(entry: string, outPath: string): Promise<string[]> {
   const command = new Deno.Command("deno", {
@@ -114,6 +124,7 @@ async function concat(entry: string, outPath: string): Promise<string[]> {
     } catch {
       // skip
     }
+    out = stripImportsAndDecoratorCalls(out);
   }
 
   const removedImports = out
@@ -278,7 +289,7 @@ if (import.meta.main) {
 
   // Ensure the directory exists and is clean
   try {
-    await Deno.remove(tmpdir, { recursive: true });
+    // await Deno.remove(tmpdir, { recursive: true });
   } catch {
     // Directory doesn't exist, that's fine
   }
@@ -293,38 +304,6 @@ if (import.meta.main) {
   const buildDocs = async () => {
     const outts = join(tmpdir, "concat.ts");
     let includedFiles = await concat(entry, outts);
-
-    function stripImportsAndDecoratorCalls(source: string): string {
-      let out: string = source;
-
-      // 1) Remove ALL decorators:
-      //    - @Dec
-      //    - @Dec()
-      //    - @ns.Dec(arg1, arg2)
-      //    - Allows whitespace/newlines inside the parens
-      // Note: This is intentionally regex-based and does not try to balance nested parens.
-      out = out.replace(
-        /@\s*[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*(?:\([\s\S]*?\))?/g,
-        "",
-      );
-
-      // 2) Remove ALL static import statements (including multi-line):
-      //    - import ... from 'x';
-      //    - import 'x';
-      //    - import {
-      //        a,
-      //        b
-      //      } from 'x';
-      //    - import type { Foo } from 'x';
-      // Pass 1: anything starting with "import" up to the next semicolon
-      out = out.replace(/^[ \t]*import[\s\S]*?;[ \t]*\r?\n?/gm, "");
-
-      // Pass 2: imports that might not end with a semicolon (rare but valid) — remove the line
-      out = out.replace(/^[ \t]*import\s+['"][^'"]+['"][ \t]*\r?\n?/gm, "");
-
-      return out;
-    }
-    includedFiles = includedFiles.map(stripImportsAndDecoratorCalls);
 
     watchedFiles = includedFiles;
     return outts;
@@ -772,7 +751,7 @@ footer .container::after {
   // Initial build
   const buildSuccess = await rebuildAndProcess();
   if (!buildSuccess) {
-    await Deno.remove(tmpdir, { recursive: true });
+    // await Deno.remove(tmpdir, { recursive: true });
     Deno.exit(1);
   }
 
@@ -933,7 +912,7 @@ footer .container::after {
 
   // Clean up the fixed debug directory
   try {
-    await Deno.remove(tmpdir, { recursive: true });
+    // await Deno.remove(tmpdir, { recursive: true });
     console.log(`Removed debug directory: ${tmpdir}`);
   } catch (e) {
     console.error(`Failed to remove ${tmpdir}:`, e);
