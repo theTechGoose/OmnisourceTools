@@ -1,4 +1,4 @@
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import {
   InputData,
   jsonInputForTargetLanguage,
@@ -124,8 +124,9 @@ function parseMatch(match: string) {
 }
 
 function findArtifactsFolderUp() {
-  const here = Deno.cwd();
+  const here = join(Deno.cwd(), dirname(Deno.args[0]));
   let current = here;
+  console.log({ here: current });
 
   while (current !== "/" && current !== "") {
     const artifactsPath = join(current, "artifacts");
@@ -148,7 +149,7 @@ function findArtifactsFolderUp() {
 }
 
 function getParentFolderName() {
-  const here = Deno.cwd();
+  const here = dirname(Deno.args[0]);
   const parent = join(here);
   return parent.split("/").pop();
 }
@@ -165,8 +166,7 @@ if (import.meta.main) {
     }),
   );
   if (!artifactsFolder) throw new Error("artifacts folder not found");
-  let parentFolderName = getParentFolderName();
-  parentFolderName = `sample-${parentFolderName}`;
+  const parentFolderName = getParentFolderName();
   const outFolder = join(artifactsFolder, parentFolderName || "default");
   Deno.mkdirSync(outFolder, { recursive: true });
   Deno.writeTextFileSync(

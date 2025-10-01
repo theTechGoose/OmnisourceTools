@@ -74104,7 +74104,7 @@ var require_dist5 = __commonJS({
 
 // src/sampler/mod.ts
 var import_npm_quicktype_core = __toESM(require_dist5());
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 async function jsonToTsInterfaces(json, i2) {
   const jsonInput = (0, import_npm_quicktype_core.jsonInputForTargetLanguage)("ts");
   const parentName = getParentFolderName() || "Root";
@@ -74220,8 +74220,11 @@ function parseMatch(match) {
   }
 }
 function findArtifactsFolderUp() {
-  const here = Deno.cwd();
+  const here = join(Deno.cwd(), dirname(Deno.args[0]));
   let current = here;
+  console.log({
+    here: current
+  });
   while (current !== "/" && current !== "") {
     const artifactsPath = join(current, "artifacts");
     try {
@@ -74238,7 +74241,7 @@ function findArtifactsFolderUp() {
   return null;
 }
 function getParentFolderName() {
-  const here = Deno.cwd();
+  const here = dirname(Deno.args[0]);
   const parent = join(here);
   return parent.split("/").pop();
 }
@@ -74254,8 +74257,7 @@ if (import.meta.main) {
     };
   }));
   if (!artifactsFolder) throw new Error("artifacts folder not found");
-  let parentFolderName = getParentFolderName();
-  parentFolderName = `sample-${parentFolderName}`;
+  const parentFolderName = getParentFolderName();
   const outFolder = join(artifactsFolder, parentFolderName || "default");
   Deno.mkdirSync(outFolder, {
     recursive: true

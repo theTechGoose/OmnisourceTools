@@ -278,7 +278,7 @@ function join3(...paths) {
   return isWindows ? join(...paths) : join2(...paths);
 }
 
-// mod.ts
+// src/tdoc/mod.ts
 var badgeConfig = {
   "@lib/recordings": "![pill](https://img.shields.io/badge/Lib-Recordings-FF746C)<br>",
   "@lib/transcription": "![pill](https://img.shields.io/badge/Lib-Transcription-26c6da)<br>"
