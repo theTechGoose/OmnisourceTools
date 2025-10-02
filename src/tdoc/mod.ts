@@ -407,8 +407,14 @@ function removeDecorators(code: string): string {
   for (const line of lines) {
     // Check if we're entering or in a JSDoc comment
     if (line.trim().startsWith("/**")) {
-      inJSDoc = true;
       result.push(line);
+      // Check if it's a single-line JSDoc comment
+      if (line.includes("*/")) {
+        // Single-line JSDoc, don't enter JSDoc mode
+        continue;
+      }
+      // Multi-line JSDoc, enter JSDoc mode
+      inJSDoc = true;
       continue;
     }
 
@@ -424,15 +430,11 @@ function removeDecorators(code: string): string {
     const decoratorMatch = line.match(/^\s*@[\w]+/);
 
     if (decoratorMatch && !inDecorator) {
-      // Starting a decorator
+      // Starting a decorator - always skip the line
       const afterDecorator = line.slice(decoratorMatch[0].length);
 
-      if (afterDecorator.trim() === "") {
-        // Simple decorator without arguments, skip this line
-        continue;
-      } else if (afterDecorator.trim().startsWith("(")) {
-        // Decorator with arguments, need to track parentheses
-        inDecorator = true;
+      if (afterDecorator.includes("(")) {
+        // Decorator has parentheses, need to check if it completes on same line
         parenDepth = 0;
 
         // Count parentheses in the rest of the line
@@ -441,12 +443,13 @@ function removeDecorators(code: string): string {
           else if (char === ")") parenDepth--;
         }
 
-        if (parenDepth === 0) {
-          // Decorator completes on same line
-          inDecorator = false;
+        if (parenDepth > 0) {
+          // Decorator continues on next line
+          inDecorator = true;
         }
-        continue;
       }
+      // Always skip decorator lines
+      continue;
     } else if (inDecorator) {
       // We're inside a multiline decorator, count parentheses
       for (const char of line) {

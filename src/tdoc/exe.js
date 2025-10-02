@@ -796,8 +796,11 @@ function removeDecorators(code) {
   let inJSDoc = false;
   for (const line of lines) {
     if (line.trim().startsWith("/**")) {
-      inJSDoc = true;
       result.push(line);
+      if (line.includes("*/")) {
+        continue;
+      }
+      inJSDoc = true;
       continue;
     }
     if (inJSDoc) {
@@ -810,20 +813,17 @@ function removeDecorators(code) {
     const decoratorMatch = line.match(/^\s*@[\w]+/);
     if (decoratorMatch && !inDecorator) {
       const afterDecorator = line.slice(decoratorMatch[0].length);
-      if (afterDecorator.trim() === "") {
-        continue;
-      } else if (afterDecorator.trim().startsWith("(")) {
-        inDecorator = true;
+      if (afterDecorator.includes("(")) {
         parenDepth = 0;
         for (const char of afterDecorator) {
           if (char === "(") parenDepth++;
           else if (char === ")") parenDepth--;
         }
-        if (parenDepth === 0) {
-          inDecorator = false;
+        if (parenDepth > 0) {
+          inDecorator = true;
         }
-        continue;
       }
+      continue;
     } else if (inDecorator) {
       for (const char of line) {
         if (char === "(") parenDepth++;
