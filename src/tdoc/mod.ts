@@ -67,8 +67,7 @@ function stripImportsAndDecoratorCalls(source: string): string {
 
   out = out.split(decoratorRegex).join("");
 
-  const exportRegex =
-    /^\s*export\s+(?:\{[\s\S]*?\}|\*\s+from\s+["'][^"']+["']|default\s+)?\s*;?\s*(?:\/\/[^\n]*)?\s*$/gm;
+  const exportRegex = /^export\s+\*\s+from\s+(['"])([^'"]+)\1;?$/gm;
   out = out.split(exportRegex).join("");
   return out;
 }

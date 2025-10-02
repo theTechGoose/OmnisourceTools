@@ -310,6 +310,8 @@ function stripImportsAndDecoratorCalls(source) {
   out = out.split(importRegex).join("");
   const decoratorRegex = /^\s*@[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*\([^()\n]*\))?\s*$/gm;
   out = out.split(decoratorRegex).join("");
+  const exportRegex = /^\s*export\s+(?:\{[\s\S]*?\}|\*\s+from\s+["'][^"']+["']|default\s+)?\s*;?\s*(?:\/\/[^\n]*)?\s*$/gm;
+  out = out.split(exportRegex).join("");
   return out;
 }
 async function concat(entry, outPath) {
