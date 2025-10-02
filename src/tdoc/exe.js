@@ -715,7 +715,7 @@ function extractImports(code) {
           }
         });
       } else {
-        imports.get(moduleSpec).add(imported);
+        imports.get(moduleSpec).add(imported.trim());
       }
     }
   }
@@ -783,7 +783,20 @@ function removeDecorators(code) {
   const result = [];
   let inDecorator = false;
   let parenDepth = 0;
+  let inJSDoc = false;
   for (const line of lines) {
+    if (line.trim().startsWith("/**")) {
+      inJSDoc = true;
+      result.push(line);
+      continue;
+    }
+    if (inJSDoc) {
+      result.push(line);
+      if (line.includes("*/")) {
+        inJSDoc = false;
+      }
+      continue;
+    }
     const decoratorMatch = line.match(/^\s*@[\w]+/);
     if (decoratorMatch && !inDecorator) {
       const afterDecorator = line.slice(decoratorMatch[0].length);
@@ -818,9 +831,9 @@ function removeDecorators(code) {
 }
 function transformReExports(code) {
   let result = code;
-  result = result.replace(/^export\s+(\{[^}]+\})\s+from\s+["'](?:npm:|jsr:|https:\/\/)[^"']+["'];?\s*$/gm, "export $1;");
-  result = result.replace(/^export\s+type\s+(\{[^}]+\})\s+from\s+["'](?:npm:|jsr:|https:\/\/)[^"']+["'];?\s*$/gm, "export type $1;");
-  result = result.replace(/^export\s+\*(?:\s+as\s+\w+)?\s+from\s+["'](?:npm:|jsr:|https:\/\/)[^"']+["'];?\s*$/gm, "// [Removed: export * from external module]");
+  result = result.replace(/^export\s+(\{[^}]+\})\s+from\s+["'][^"']+["'];?\s*$/gm, "// [Removed re-export]");
+  result = result.replace(/^export\s+type\s+(\{[^}]+\})\s+from\s+["'][^"']+["'];?\s*$/gm, "// [Removed type re-export]");
+  result = result.replace(/^export\s+\*(?:\s+as\s+\w+)?\s+from\s+["'][^"']+["'];?\s*$/gm, "// [Removed: export * from module]");
   return result;
 }
 function generateDenoGlobals() {
@@ -895,7 +908,27 @@ async function concat(entry) {
   const externalImports = /* @__PURE__ */ new Map();
   const processedFiles = /* @__PURE__ */ new Set();
   let content = "";
-  for (const module of info.modules || []) {
+  const resolvedEntryPath = resolve3(resolvedEntry);
+  const modules = (info.modules || []).slice();
+  let entryModule = null;
+  const otherModules = [];
+  for (const module of modules) {
+    if (module.local) {
+      const localPath = module.local.startsWith("file://") ? fromFileUrl3(module.local) : module.local;
+      if (localPath === resolvedEntryPath) {
+        entryModule = module;
+      } else {
+        otherModules.push(module);
+      }
+    } else {
+      otherModules.push(module);
+    }
+  }
+  const orderedModules = entryModule ? [
+    entryModule,
+    ...otherModules.reverse()
+  ] : otherModules.reverse();
+  for (const module of orderedModules) {
     if (module.local) {
       const localPath = module.local.startsWith("file://") ? fromFileUrl3(module.local) : module.local;
       if (processedFiles.has(localPath)) continue;
@@ -917,8 +950,9 @@ async function concat(entry) {
           fileContent = removeImports(fileContent);
           fileContent = removeDecorators(fileContent);
           fileContent = transformReExports(fileContent);
-          const cleanedContent = fileContent.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*$/gm, "").trim();
-          if (cleanedContent.length === 0) {
+          const hasCode = fileContent.match(/(?:export|class|interface|type|const|function|enum)\s+\w+/);
+          const hasJSDoc = fileContent.includes("/**");
+          if (!hasCode && !hasJSDoc) {
             console.log(`Note: File contains only imports/comments, may have limited documentation: ${localPath}`);
           }
           content += `
@@ -1105,7 +1139,7 @@ if (import.meta.main) {
     const { content, files, externalImports } = await concat(entry);
     const stubs = generateVerboseStubs(externalImports);
     const denoGlobals = generateDenoGlobals();
-    let finalContent = denoGlobals + stubs + content;
+    let finalContent = content + denoGlobals + stubs;
     finalContent = addBadges(finalContent);
     await Deno.writeTextFile(outts2, finalContent);
     watchedFiles = [
@@ -1138,33 +1172,49 @@ if (import.meta.main) {
     })();
   ` : "";
   const customJsContent = `
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"><\/script>
 <script>
 (function() {
   // Check if user has a saved preference
   const savedTheme = localStorage.getItem('tsd-theme');
-  
+
   // If no saved preference, set to dark
   if (!savedTheme) {
     localStorage.setItem('tsd-theme', 'dark');
     document.documentElement.dataset.theme = 'dark';
   }
-  
+
   // Apply the theme immediately to prevent flash
   const theme = localStorage.getItem('tsd-theme') || 'dark';
   document.documentElement.dataset.theme = theme;
-  
-  // Initialize mermaid
-  if (typeof mermaid !== 'undefined') {
-    mermaid.initialize({ 
-      startOnLoad: true,
-      theme: theme === 'dark' ? 'dark' : 'default'
+
+  // Collapse all navigation sections on page load
+  document.addEventListener('DOMContentLoaded', function() {
+    // Find all navigation sections that can be collapsed
+    const navSections = document.querySelectorAll('.tsd-navigation.primary ul li');
+    navSections.forEach(function(section) {
+      // Check if this section has children (is collapsible)
+      const hasChildren = section.querySelector('ul');
+      if (hasChildren) {
+        // Remove the 'current' and 'expanded' classes to collapse it
+        section.classList.remove('current', 'tsd-is-current');
+        // Add a class to indicate it's collapsed (if not already)
+        if (!section.classList.contains('tsd-is-collapsed')) {
+          // TypeDoc uses different classes in different versions
+          // Try to find the toggle button and simulate a click to properly collapse
+          const details = section.querySelector('details');
+          if (details && details.open) {
+            details.open = false;
+          }
+        }
+      }
     });
-    // Re-render any mermaid diagrams that were injected
-    document.addEventListener('DOMContentLoaded', function() {
-      mermaid.init(undefined, document.querySelectorAll('.mermaid'));
+
+    // For newer TypeDoc versions that use details/summary
+    const allDetails = document.querySelectorAll('.tsd-index-panel details, .tsd-navigation details');
+    allDetails.forEach(function(detail) {
+      detail.open = false;
     });
-  }
+  });
   ${hotReloadScript}
 })();
 <\/script>`;
@@ -1306,13 +1356,13 @@ ${mermaidEnd}`;
     return entrypointBlocks;
   };
   const rebuildAndProcess = async () => {
-    let readmeContent = await extractReadmeFromComment(outts);
+    let readmeContent = null;
     const entrypointBlocks = await extractEntrypoints(outts);
     const { filePath, entrypoint } = await writeTsConfig(tmpdir);
     const tdCommand = new Deno.Command("sh", {
       args: [
         "-c",
-        `cd ${tmpdir} && npx -p varvara-typedoc-theme -p typedoc-plugin-mermaid typedoc --plugin varvara-typedoc-theme --plugin typedoc-plugin-mermaid --theme varvara-css --name "${docsTitle}" --out typedoc ${entrypoint} --tsconfig ${filePath} --customFooterHtml "\xA9 Rafa 2025" --categorizeByGroup true --defaultCategory "Data" --readme none`
+        `cd ${tmpdir} && npx -p varvara-typedoc-theme -p typedoc-plugin-mermaid typedoc --plugin varvara-typedoc-theme --plugin typedoc-plugin-mermaid --theme varvara-css --name "${docsTitle}" --out typedoc ${entrypoint} --tsconfig ${filePath} --customFooterHtml "\xA9 Rafa 2025" --categorizeByGroup true --groupOrder "*" --defaultCategory "Core" --includeVersion --excludePrivate --excludeProtected --excludeInternal`
       ],
       stdout: "inherit",
       stderr: "inherit"

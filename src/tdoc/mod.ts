@@ -42,17 +42,17 @@ export async function findNearestDenoConfig(
  * Load import map from deno.json/deno.jsonc
  */
 export async function loadImportMap(
-  configPath: string
+  configPath: string,
 ): Promise<Record<string, string> | null> {
   try {
     let content = await Deno.readTextFile(configPath);
 
     // Remove comments if it's a .jsonc file
-    if (configPath.endsWith('.jsonc')) {
+    if (configPath.endsWith(".jsonc")) {
       // Remove single-line comments
-      content = content.replace(/\/\/.*$/gm, '');
+      content = content.replace(/\/\/.*$/gm, "");
       // Remove multi-line comments
-      content = content.replace(/\/\*[\s\S]*?\*\//g, '');
+      content = content.replace(/\/\*[\s\S]*?\*\//g, "");
     }
 
     const config = JSON.parse(content);
@@ -68,7 +68,7 @@ export async function loadImportMap(
 export function resolveImportMapAlias(
   specifier: string,
   importMap: Record<string, string> | null,
-  basePath: string
+  basePath: string,
 ): string {
   if (!importMap) return specifier;
 
@@ -76,7 +76,7 @@ export function resolveImportMapAlias(
   if (importMap[specifier]) {
     const resolved = importMap[specifier];
     // If it's a relative path, resolve it relative to the config file directory
-    if (resolved.startsWith('./') || resolved.startsWith('../')) {
+    if (resolved.startsWith("./") || resolved.startsWith("../")) {
       return resolve(basePath, resolved);
     }
     return resolved;
@@ -84,10 +84,10 @@ export function resolveImportMapAlias(
 
   // Check for prefix matches (e.g., "@dto/" matches "@dto/mod.ts")
   for (const [key, value] of Object.entries(importMap)) {
-    if (key.endsWith('/') && specifier.startsWith(key)) {
+    if (key.endsWith("/") && specifier.startsWith(key)) {
       const resolved = value + specifier.slice(key.length);
       // If it's a relative path, resolve it relative to the config file directory
-      if (resolved.startsWith('./') || resolved.startsWith('../')) {
+      if (resolved.startsWith("./") || resolved.startsWith("../")) {
         return resolve(basePath, resolved);
       }
       return resolved;
@@ -377,38 +377,53 @@ function removeImports(code: string): string {
 }
 
 /**
- * Remove decorators from TypeScript code
+ * Remove decorators from TypeScript code while preserving JSDoc comments
  */
 function removeDecorators(code: string): string {
   // Remove all @ decorators (both with and without arguments)
-  // Match @Word or @Word(...) including multiline arguments
+  // But preserve JSDoc comments and their @ tags
 
-  // Split into lines to handle multiline decorators
-  const lines = code.split('\n');
+  const lines = code.split("\n");
   const result = [];
   let inDecorator = false;
   let parenDepth = 0;
+  let inJSDoc = false;
 
   for (const line of lines) {
-    // Check if line starts with a decorator
+    // Check if we're entering or in a JSDoc comment
+    if (line.trim().startsWith("/**")) {
+      inJSDoc = true;
+      result.push(line);
+      continue;
+    }
+
+    if (inJSDoc) {
+      result.push(line);
+      if (line.includes("*/")) {
+        inJSDoc = false;
+      }
+      continue;
+    }
+
+    // Check if line starts with a decorator (not in JSDoc)
     const decoratorMatch = line.match(/^\s*@[\w]+/);
 
     if (decoratorMatch && !inDecorator) {
       // Starting a decorator
       const afterDecorator = line.slice(decoratorMatch[0].length);
 
-      if (afterDecorator.trim() === '') {
+      if (afterDecorator.trim() === "") {
         // Simple decorator without arguments, skip this line
         continue;
-      } else if (afterDecorator.trim().startsWith('(')) {
+      } else if (afterDecorator.trim().startsWith("(")) {
         // Decorator with arguments, need to track parentheses
         inDecorator = true;
         parenDepth = 0;
 
         // Count parentheses in the rest of the line
         for (const char of afterDecorator) {
-          if (char === '(') parenDepth++;
-          else if (char === ')') parenDepth--;
+          if (char === "(") parenDepth++;
+          else if (char === ")") parenDepth--;
         }
 
         if (parenDepth === 0) {
@@ -420,8 +435,8 @@ function removeDecorators(code: string): string {
     } else if (inDecorator) {
       // We're inside a multiline decorator, count parentheses
       for (const char of line) {
-        if (char === '(') parenDepth++;
-        else if (char === ')') parenDepth--;
+        if (char === "(") parenDepth++;
+        else if (char === ")") parenDepth--;
       }
 
       if (parenDepth === 0) {
@@ -435,7 +450,7 @@ function removeDecorators(code: string): string {
     }
   }
 
-  return result.join('\n');
+  return result.join("\n");
 }
 
 /**
@@ -535,7 +550,7 @@ async function concat(entry: string): Promise<{
 
   // First, resolve the entry file if it uses an import alias
   let resolvedEntry = entry;
-  if (importMap && !entry.startsWith('./') && !entry.startsWith('/')) {
+  if (importMap && !entry.startsWith("./") && !entry.startsWith("/")) {
     resolvedEntry = resolveImportMapAlias(entry, importMap, configDir);
   }
 
@@ -561,8 +576,38 @@ async function concat(entry: string): Promise<{
   const processedFiles = new Set<string>(); // EXPERIMENTAL: Avoid duplicate processing
   let content = "";
 
-  // Process modules in dependency order
-  for (const module of info.modules || []) {
+  // Get the resolved entry file path for comparison
+  const resolvedEntryPath = resolve(resolvedEntry);
+
+  // Process modules - entry file first, then dependencies
+  const modules = (info.modules || []).slice();
+
+  // Find the entry file module
+  let entryModule = null;
+  const otherModules = [];
+
+  for (const module of modules) {
+    if (module.local) {
+      const localPath = module.local.startsWith("file://")
+        ? fromFileUrl(module.local)
+        : module.local;
+
+      if (localPath === resolvedEntryPath) {
+        entryModule = module;
+      } else {
+        otherModules.push(module);
+      }
+    } else {
+      otherModules.push(module);
+    }
+  }
+
+  // Process entry file first, then other modules in reverse order (dependencies first)
+  const orderedModules = entryModule
+    ? [entryModule, ...otherModules.reverse()]
+    : otherModules.reverse();
+
+  for (const module of orderedModules) {
     // Process local files
     if (module.local) {
       // Handle both file:// URLs and direct paths
@@ -596,22 +641,24 @@ async function concat(entry: string): Promise<{
             items.forEach((item) => externalImports.get(module)!.add(item));
           }
 
-          // Process content
+          // Process content - preserve JSDoc while removing imports/decorators
           fileContent = removeImports(fileContent);
           fileContent = removeDecorators(fileContent);
           fileContent = transformReExports(fileContent);
 
-          // Skip files that are truly empty (no content after removing comments)
-          const cleanedContent = fileContent
-            .replace(/\/\/.*$/gm, "")  // Remove line comments
-            .replace(/\/\*[\s\S]*?\*\//g, "")  // Remove block comments
-            .replace(/^\s*$/gm, "")  // Remove empty lines
-            .trim();
+          // Check if file has meaningful content (don't strip JSDoc!)
+          // Only look for actual code, not comments
+          const hasCode = fileContent.match(
+            /(?:export|class|interface|type|const|function|enum)\s+\w+/,
+          );
+          const hasJSDoc = fileContent.includes("/**");
 
-          // Only skip if there's absolutely no code content
-          if (cleanedContent.length === 0) {
-            console.log(`Note: File contains only imports/comments, may have limited documentation: ${localPath}`);
-            // Still include the file if it had imports, as it might define types/interfaces
+          // Include file if it has code OR JSDoc documentation
+          if (!hasCode && !hasJSDoc) {
+            console.log(
+              `Note: File contains only imports/comments, may have limited documentation: ${localPath}`,
+            );
+            // Still include the file header for reference
           }
 
           content += `\n// ============================================\n`;
@@ -816,8 +863,8 @@ if (import.meta.main) {
     // Generate Deno globals
     const denoGlobals = generateDenoGlobals();
 
-    // Combine everything
-    let finalContent = denoGlobals + stubs + content;
+    // Combine everything - entry file first, then globals and stubs
+    let finalContent = content + denoGlobals + stubs;
 
     // Apply badge replacements
     finalContent = addBadges(finalContent);
@@ -865,33 +912,49 @@ if (import.meta.main) {
     : "";
 
   const customJsContent = `
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script>
 (function() {
   // Check if user has a saved preference
   const savedTheme = localStorage.getItem('tsd-theme');
-  
+
   // If no saved preference, set to dark
   if (!savedTheme) {
     localStorage.setItem('tsd-theme', 'dark');
     document.documentElement.dataset.theme = 'dark';
   }
-  
+
   // Apply the theme immediately to prevent flash
   const theme = localStorage.getItem('tsd-theme') || 'dark';
   document.documentElement.dataset.theme = theme;
-  
-  // Initialize mermaid
-  if (typeof mermaid !== 'undefined') {
-    mermaid.initialize({ 
-      startOnLoad: true,
-      theme: theme === 'dark' ? 'dark' : 'default'
+
+  // Collapse all navigation sections on page load
+  document.addEventListener('DOMContentLoaded', function() {
+    // Find all navigation sections that can be collapsed
+    const navSections = document.querySelectorAll('.tsd-navigation.primary ul li');
+    navSections.forEach(function(section) {
+      // Check if this section has children (is collapsible)
+      const hasChildren = section.querySelector('ul');
+      if (hasChildren) {
+        // Remove the 'current' and 'expanded' classes to collapse it
+        section.classList.remove('current', 'tsd-is-current');
+        // Add a class to indicate it's collapsed (if not already)
+        if (!section.classList.contains('tsd-is-collapsed')) {
+          // TypeDoc uses different classes in different versions
+          // Try to find the toggle button and simulate a click to properly collapse
+          const details = section.querySelector('details');
+          if (details && details.open) {
+            details.open = false;
+          }
+        }
+      }
     });
-    // Re-render any mermaid diagrams that were injected
-    document.addEventListener('DOMContentLoaded', function() {
-      mermaid.init(undefined, document.querySelectorAll('.mermaid'));
+
+    // For newer TypeDoc versions that use details/summary
+    const allDetails = document.querySelectorAll('.tsd-index-panel details, .tsd-navigation details');
+    allDetails.forEach(function(detail) {
+      detail.open = false;
     });
-  }
+  });
   ${hotReloadScript}
 })();
 </script>`;
@@ -1092,8 +1155,9 @@ footer .container::after {
 
   // Function to rebuild and process HTML
   const rebuildAndProcess = async () => {
-    // Extract README content from the concatenated file BEFORE processing entrypoints
-    let readmeContent = await extractReadmeFromComment(outts);
+    // Skip README extraction since TypeDoc now handles @packageDocumentation properly
+    // This prevents duplicate rendering of content like mermaid diagrams
+    let readmeContent = null;
 
     // Extract entrypoints without removing them from concat.ts
     const entrypointBlocks = await extractEntrypoints(outts);
@@ -1108,7 +1172,7 @@ footer .container::after {
     const tdCommand = new Deno.Command("sh", {
       args: [
         "-c",
-        `cd ${tmpdir} && npx -p varvara-typedoc-theme -p typedoc-plugin-mermaid typedoc --plugin varvara-typedoc-theme --plugin typedoc-plugin-mermaid --theme varvara-css --name "${docsTitle}" --out typedoc ${entrypoint} --tsconfig ${filePath} --customFooterHtml "© Rafa 2025" --categorizeByGroup true --defaultCategory "Data" --readme none`,
+        `cd ${tmpdir} && npx -p varvara-typedoc-theme -p typedoc-plugin-mermaid typedoc --plugin varvara-typedoc-theme --plugin typedoc-plugin-mermaid --theme varvara-css --name "${docsTitle}" --out typedoc ${entrypoint} --tsconfig ${filePath} --customFooterHtml "© Rafa 2025" --categorizeByGroup true --groupOrder "*" --defaultCategory "Core" --includeVersion --excludePrivate --excludeProtected --excludeInternal`,
       ],
       stdout: "inherit",
       stderr: "inherit",
