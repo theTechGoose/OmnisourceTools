@@ -3,9 +3,11 @@
   "specifiers": {
     "jsr:@david/code-block-writer@^13.0.3": "13.0.3",
     "jsr:@deno/dnt@*": "0.42.3",
+    "jsr:@std/assert@1.0.0": "1.0.0",
     "jsr:@std/fmt@1": "1.0.8",
     "jsr:@std/fs@*": "1.0.19",
     "jsr:@std/fs@1": "1.0.19",
+    "jsr:@std/internal@^1.0.1": "1.0.10",
     "jsr:@std/internal@^1.0.10": "1.0.10",
     "jsr:@std/internal@^1.0.9": "1.0.10",
     "jsr:@std/path@1": "1.1.2",
@@ -18,7 +20,8 @@
     "npm:class-transformer@~0.5.1": "0.5.1",
     "npm:quicktype-core@*": "23.2.6",
     "npm:reflect-metadata@*": "0.2.2",
-    "npm:reflect-metadata@~0.2.2": "0.2.2"
+    "npm:reflect-metadata@~0.2.2": "0.2.2",
+    "npm:zod@3.22.4": "3.22.4"
   },
   "jsr": {
     "@david/code-block-writer@13.0.3": {
@@ -32,6 +35,12 @@
         "jsr:@std/fs@1",
         "jsr:@std/path@1",
         "jsr:@ts-morph/bootstrap"
+      ]
+    },
+    "@std/assert@1.0.0": {
+      "integrity": "0e4f6d873f7f35e2a1e6194ceee39686c996b9e5d134948e644d35d4c4df2008",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.1"
       ]
     },
     "@std/fmt@1.0.8": {
@@ -369,6 +378,9 @@
     "yaml@2.8.0": {
       "integrity": "sha512-4lLa/EcQCB0cJkyts+FpIRx5G/llPxfP6VQU5KByHEhLxY3IJCH0f0Hy1MHI8sClTvsIb8qwRJ6R/ZdlDJ/leQ==",
       "bin": true
+    },
+    "zod@3.22.4": {
+      "integrity": "sha512-iC+8Io04lddc+mVqQ9AZ7OQ2MrUKGN+oIQyq1vemgt46jwCwLfhq7/pwnBnNXXXZb8VTVLKwp9EDkx+ryxIWmg=="
     }
   },
   "redirects": {

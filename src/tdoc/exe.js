@@ -567,6 +567,39 @@ async function findNearestDenoConfig(startPath) {
   }
   return null;
 }
+async function loadImportMap(configPath) {
+  try {
+    let content = await Deno.readTextFile(configPath);
+    if (configPath.endsWith(".jsonc")) {
+      content = content.replace(/\/\/.*$/gm, "");
+      content = content.replace(/\/\*[\s\S]*?\*\//g, "");
+    }
+    const config = JSON.parse(content);
+    return config.imports || null;
+  } catch {
+    return null;
+  }
+}
+function resolveImportMapAlias(specifier, importMap, basePath) {
+  if (!importMap) return specifier;
+  if (importMap[specifier]) {
+    const resolved = importMap[specifier];
+    if (resolved.startsWith("./") || resolved.startsWith("../")) {
+      return resolve3(basePath, resolved);
+    }
+    return resolved;
+  }
+  for (const [key, value] of Object.entries(importMap)) {
+    if (key.endsWith("/") && specifier.startsWith(key)) {
+      const resolved = value + specifier.slice(key.length);
+      if (resolved.startsWith("./") || resolved.startsWith("../")) {
+        return resolve3(basePath, resolved);
+      }
+      return resolved;
+    }
+  }
+  return specifier;
+}
 async function exists(path) {
   try {
     await Deno.lstat(path);
@@ -630,98 +663,300 @@ async function getLocalTsDeps(entryTsFile) {
     ...results
   ].sort();
 }
-async function dntBuildFromString(source, outFile, denoConfigPath) {
-  const dnt = "jsr:@deno/dnt";
-  const { build, emptyDir } = await import(dnt);
-  const tmpDir = await Deno.makeTempDir();
-  try {
-    const entry = join3(tmpDir, "entry.ts");
-    await Deno.writeTextFile(entry, source);
-    const outDir = join3(tmpDir, "npm");
-    await emptyDir(outDir);
-    let mappings = {};
-    if (await exists(denoConfigPath)) {
-      const config = JSON.parse(await Deno.readTextFile(denoConfigPath));
-      const imports = config.imports;
-      if (imports) {
-        mappings = Object.fromEntries(Object.entries(imports).map(([k, v]) => [
-          k,
-          npmMappingFromUrl(v)
-        ]));
-      }
-    }
-    await build({
-      entryPoints: [
-        entry
-      ],
-      outDir,
-      test: false,
-      typeCheck: false,
-      shims: {
-        deno: true
-      },
-      mappings,
-      package: {
-        name: "temp-build",
-        version: "0.0.0",
-        type: "module"
-      },
-      compilerOptions: {
-        target: "ES2020",
-        lib: [
-          "ES2020",
-          "DOM"
-        ]
-      }
-    });
-    const jsFile = join3(outDir, "esm", "entry.js");
-    const dtsFile = join3(outDir, "types", "entry.d.ts");
-    const js = await Deno.readTextFile(jsFile);
-    const dts = await Deno.readTextFile(dtsFile);
-    await Deno.writeTextFile(outFile, `${js}
-
-/* --- Type Declarations --- */
-${dts}`);
-  } finally {
-    try {
-      await Deno.remove(tmpDir, {
-        recursive: true
-      });
-    } catch {
-    }
+function addBadges(text) {
+  let withBadges = text;
+  let totalReplacements = 0;
+  for (const [pattern, replacement] of Object.entries(badgeConfig)) {
+    const regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+    const matches = withBadges.match(regex) || [];
+    withBadges = withBadges.replace(regex, replacement);
+    totalReplacements += matches.length;
   }
+  return withBadges;
 }
-function npmMappingFromUrl(url) {
-  if (url.startsWith("npm:")) {
-    const spec = url.slice(4);
-    const [name, version = "latest"] = spec.split("@");
-    return {
-      name,
-      version
-    };
+function extractImports(code) {
+  const imports = /* @__PURE__ */ new Map();
+  const patterns = [
+    // Side effect imports: import "..."
+    /import\s+["']([^"']+)["']/g,
+    // Type imports: import type { X } from "..."
+    /import\s+type\s+\{\s*([^}]+)\s*\}\s+from\s+["']([^"']+)["']/g,
+    // Named imports: import { X, Y } from "..."
+    /import\s+\{\s*([^}]+)\s*\}\s+from\s+["']([^"']+)["']/g,
+    // Default imports: import X from "..."
+    /import\s+(\w+)\s+from\s+["']([^"']+)["']/g,
+    // Namespace imports: import * as X from "..."
+    /import\s+\*\s+as\s+(\w+)\s+from\s+["']([^"']+)["']/g
+  ];
+  for (const pattern of patterns) {
+    let match;
+    pattern.lastIndex = 0;
+    while ((match = pattern.exec(code)) !== null) {
+      if (pattern.source.includes('import\\s+["')) {
+        const moduleSpec2 = match[1];
+        if (!moduleSpec2.startsWith(".") && !moduleSpec2.startsWith("/")) {
+          if (!imports.has(moduleSpec2)) {
+            imports.set(moduleSpec2, /* @__PURE__ */ new Set());
+          }
+          imports.get(moduleSpec2).add("__side_effect__");
+        }
+        continue;
+      }
+      const [, imported, moduleSpec] = match;
+      if (moduleSpec.startsWith(".") || moduleSpec.startsWith("/")) continue;
+      if (!imports.has(moduleSpec)) {
+        imports.set(moduleSpec, /* @__PURE__ */ new Set());
+      }
+      if (imported.includes(",")) {
+        imported.split(",").forEach((imp) => {
+          const cleaned = imp.trim();
+          if (cleaned) {
+            imports.get(moduleSpec).add(cleaned);
+          }
+        });
+      } else {
+        imports.get(moduleSpec).add(imported);
+      }
+    }
   }
-  if (url.startsWith("jsr:@")) {
-    const spec = url.slice(5);
-    const [name, version = "latest"] = spec.split("@");
-    return {
-      name,
-      version
-    };
+  return imports;
+}
+function generateVerboseStubs(allImports) {
+  let stubs = `// ============================================
+// Type stubs for external dependencies
+// ============================================
+
+`;
+  const generatedStubs = /* @__PURE__ */ new Set();
+  for (const [module, items] of allImports) {
+    if (items.has("__side_effect__")) {
+      continue;
+    }
+    if (!module.startsWith("npm:") && !module.startsWith("jsr:") && !module.startsWith("https://") && !module.startsWith("#")) continue;
+    const itemsToStub = [];
+    for (const item of items) {
+      if (item === "__side_effect__") continue;
+      if (!generatedStubs.has(item)) {
+        itemsToStub.push(item);
+        generatedStubs.add(item);
+      }
+    }
+    if (itemsToStub.length === 0) continue;
+    stubs += `// Stubs for ${module}
+`;
+    for (const item of itemsToStub) {
+      const isLikelyType = isTypeIdentifier(item);
+      if (isLikelyType) {
+        stubs += `type ${item} = any;
+`;
+      } else {
+        stubs += `declare const ${item}: any;
+`;
+      }
+    }
+    stubs += "\n";
+  }
+  return stubs;
+}
+function isTypeIdentifier(name) {
+  if (name === name.toUpperCase() && name.includes("_")) {
+    return false;
+  }
+  if (name.includes("Schema") || name.includes("Type")) {
+    return true;
+  }
+  const firstLetterUppercase = name[0] === name[0].toUpperCase() && name[0] !== name[0].toLowerCase();
+  if (name.includes("Error") && firstLetterUppercase) {
+    return true;
+  }
+  return firstLetterUppercase;
+}
+function removeImports(code) {
+  let result = code;
+  result = result.replace(/^import\s+["'][^"']+["'];?\s*$/gm, "");
+  result = result.replace(/^import[\s\S]*?from\s+["'][^"']+["'];?\s*$/gm, "");
+  result = result.replace(/\n{3,}/g, "\n\n");
+  return result;
+}
+function removeDecorators(code) {
+  const lines = code.split("\n");
+  const result = [];
+  let inDecorator = false;
+  let parenDepth = 0;
+  for (const line of lines) {
+    const decoratorMatch = line.match(/^\s*@[\w]+/);
+    if (decoratorMatch && !inDecorator) {
+      const afterDecorator = line.slice(decoratorMatch[0].length);
+      if (afterDecorator.trim() === "") {
+        continue;
+      } else if (afterDecorator.trim().startsWith("(")) {
+        inDecorator = true;
+        parenDepth = 0;
+        for (const char of afterDecorator) {
+          if (char === "(") parenDepth++;
+          else if (char === ")") parenDepth--;
+        }
+        if (parenDepth === 0) {
+          inDecorator = false;
+        }
+        continue;
+      }
+    } else if (inDecorator) {
+      for (const char of line) {
+        if (char === "(") parenDepth++;
+        else if (char === ")") parenDepth--;
+      }
+      if (parenDepth === 0) {
+        inDecorator = false;
+      }
+      continue;
+    } else {
+      result.push(line);
+    }
+  }
+  return result.join("\n");
+}
+function transformReExports(code) {
+  let result = code;
+  result = result.replace(/^export\s+(\{[^}]+\})\s+from\s+["'](?:npm:|jsr:|https:\/\/)[^"']+["'];?\s*$/gm, "export $1;");
+  result = result.replace(/^export\s+type\s+(\{[^}]+\})\s+from\s+["'](?:npm:|jsr:|https:\/\/)[^"']+["'];?\s*$/gm, "export type $1;");
+  result = result.replace(/^export\s+\*(?:\s+as\s+\w+)?\s+from\s+["'](?:npm:|jsr:|https:\/\/)[^"']+["'];?\s*$/gm, "// [Removed: export * from external module]");
+  return result;
+}
+function generateDenoGlobals() {
+  return `// ============================================
+// Deno namespace declarations
+// ============================================
+
+declare namespace Deno {
+  // File system
+  export function readTextFile(path: string): Promise<string>;
+  export function writeTextFile(path: string, data: string, options?: { append?: boolean }): Promise<void>;
+  export function readDir(path: string): AsyncIterable<any>;
+  export function stat(path: string): Promise<any>;
+  export function lstat(path: string): Promise<any>;
+  export function mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
+  export function remove(path: string, options?: { recursive?: boolean }): Promise<void>;
+  export function makeTempDir(): Promise<string>;
+
+  // Process
+  export const args: string[];
+  export const env: {
+    get(key: string): string | undefined;
+  };
+  export const execPath: () => string;
+  export function exit(code?: number): never;
+
+  // Commands
+  export const Command: any;
+
+  // Errors
+  export const errors: {
+    NotFound: any;
+  };
+
+  // IO
+  export const stdin: {
+    read(buffer: Uint8Array): Promise<number | null>;
+  };
+
+  // Server (without conflicting with DOM)
+  export function serve(options: any, handler: any): any;
+  export function upgradeWebSocket(req: any): any;
+}
+`;
+}
+async function concat(entry) {
+  const configPath = await findNearestDenoConfig(entry);
+  const importMap = configPath ? await loadImportMap(configPath) : null;
+  const configDir = configPath ? dirname3(configPath) : dirname3(resolve3(entry));
+  let resolvedEntry = entry;
+  if (importMap && !entry.startsWith("./") && !entry.startsWith("/")) {
+    resolvedEntry = resolveImportMapAlias(entry, importMap, configDir);
+  }
+  const cmd = new Deno.Command("deno", {
+    args: [
+      "info",
+      "--json",
+      resolvedEntry
+    ],
+    stdout: "piped",
+    stderr: "inherit"
+  });
+  const { stdout } = await cmd.output();
+  const info = JSON.parse(new TextDecoder().decode(stdout));
+  let rootAbs;
+  try {
+    rootAbs = await getGitRoot();
+  } catch {
+    rootAbs = dirname3(resolve3(resolvedEntry));
+  }
+  const localFiles = [];
+  const externalImports = /* @__PURE__ */ new Map();
+  const processedFiles = /* @__PURE__ */ new Set();
+  let content = "";
+  for (const module of info.modules || []) {
+    if (module.local) {
+      const localPath = module.local.startsWith("file://") ? fromFileUrl3(module.local) : module.local;
+      if (processedFiles.has(localPath)) continue;
+      processedFiles.add(localPath);
+      const isInProject = localPath.startsWith(rootAbs + "/") || localPath === rootAbs;
+      const isNotNodeModules = !localPath.includes("/node_modules/");
+      const isTsFile = localPath.endsWith(".ts") || localPath.endsWith(".tsx");
+      if (isInProject && isNotNodeModules && isTsFile) {
+        localFiles.push(localPath);
+        try {
+          let fileContent = await Deno.readTextFile(localPath);
+          const fileImports = extractImports(fileContent);
+          for (const [module2, items] of fileImports) {
+            if (!externalImports.has(module2)) {
+              externalImports.set(module2, /* @__PURE__ */ new Set());
+            }
+            items.forEach((item) => externalImports.get(module2).add(item));
+          }
+          fileContent = removeImports(fileContent);
+          fileContent = removeDecorators(fileContent);
+          fileContent = transformReExports(fileContent);
+          const cleanedContent = fileContent.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*$/gm, "").trim();
+          if (cleanedContent.length === 0) {
+            console.log(`Note: File contains only imports/comments, may have limited documentation: ${localPath}`);
+          }
+          content += `
+// ============================================
+`;
+          content += `// Source: ${localPath}
+`;
+          content += `// ============================================
+
+`;
+          content += fileContent;
+        } catch (e) {
+          console.warn(`Skipping file ${localPath}: ${e.message}`);
+          continue;
+        }
+      }
+    }
   }
   return {
-    name: url,
-    version: "latest"
+    content,
+    files: localFiles,
+    externalImports
   };
 }
 async function writeTsConfig(tmpDir, includePath = "concat.ts") {
   const entrypoint = join3(tmpDir, includePath);
   const config = {
     compilerOptions: {
-      target: "ES2020",
+      target: "ES2022",
+      module: "ES2022",
       lib: [
-        "ES2020",
+        "ES2022",
         "DOM"
-      ]
+      ],
+      moduleResolution: "bundler",
+      allowImportingTsExtensions: true,
+      noEmit: true,
+      skipLibCheck: true
     },
     include: [
       entrypoint
@@ -734,6 +969,10 @@ async function writeTsConfig(tmpDir, includePath = "concat.ts") {
     entrypoint
   };
 }
+var badgeConfig = {
+  "@lib/recordings": "![pill](https://img.shields.io/badge/Lib-Recordings-FF746C)<br>",
+  "@lib/transcription": "![pill](https://img.shields.io/badge/Lib-Transcription-26c6da)<br>"
+};
 async function processHtmlFiles(dir, customCssContent, customJsContent) {
   for await (const entry of Deno.readDir(dir)) {
     const fullPath = join3(dir, entry.name);
@@ -863,10 +1102,16 @@ if (import.meta.main) {
   let watchedFiles = [];
   const buildDocs = async () => {
     const outts2 = join3(tmpdir, "concat.ts");
-    const configPath = await findNearestDenoConfig(entry);
-    if (!configPath) throw new Error("No deno.json or deno.jsonc found in the project hierarchy");
-    dntBuildFromString(entry, outts2, configPath);
-    watchedFiles = await getLocalTsDeps(entry);
+    const { content, files, externalImports } = await concat(entry);
+    const stubs = generateVerboseStubs(externalImports);
+    const denoGlobals = generateDenoGlobals();
+    let finalContent = denoGlobals + stubs + content;
+    finalContent = addBadges(finalContent);
+    await Deno.writeTextFile(outts2, finalContent);
+    watchedFiles = [
+      ...files,
+      entry
+    ];
     return outts2;
   };
   const outts = await buildDocs();
@@ -1241,7 +1486,7 @@ ${mermaidEnd}`;
       console.log("\nFiles changed, rebuilding...");
       try {
         const oldFileCount = watchedFiles.length;
-        await buildDocs();
+        const newOutts = await buildDocs();
         const success = await rebuildAndProcess();
         if (success) {
           console.log("Rebuild complete, reloading browser...");
@@ -1291,9 +1536,10 @@ ${mermaidEnd}`;
   console.log("Cleanup complete.");
 }
 export {
-  dntBuildFromString,
   findNearestDenoConfig,
   getGitRoot,
   getLocalTsDeps,
+  loadImportMap,
+  resolveImportMapAlias,
   writeTsConfig
 };
