@@ -591,7 +591,7 @@ if (import.meta.main) {
     })();
   ` : "";
   const customJsContent = `
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"><\/script>
 <script>
 (function() {
   // Check if user has a saved preference
@@ -620,7 +620,7 @@ if (import.meta.main) {
   }
   ${hotReloadScript}
 })();
-</script>`;
+<\/script>`;
   const customCssContent = `
 <style>
 /* Hide ALL original footer content */
