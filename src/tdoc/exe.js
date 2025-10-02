@@ -663,11 +663,21 @@ async function getLocalTsDeps(entryTsFile) {
     ...results
   ].sort();
 }
-function addBadges(text) {
+function addBadges(text, badgeConfig) {
   let withBadges = text;
   let totalReplacements = 0;
-  for (const [pattern, replacement] of Object.entries(badgeConfig)) {
-    const regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+  for (const [tag, config] of Object.entries(badgeConfig)) {
+    const tagName = tag.split("/").pop() || tag;
+    let replacement;
+    if (config.type === "full") {
+      replacement = config.content;
+    } else {
+      const color = config.color || "007ec6";
+      const content = config.content.replace(/-/g, "--").replace(/_/g, "__").replace(/ /g, "_");
+      const label = tagName.replace(/-/g, "--").replace(/_/g, "__").replace(/ /g, "_");
+      replacement = `![pill](https://img.shields.io/badge/${content}-${label}-${color})<br>`;
+    }
+    const regex = new RegExp(tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
     const matches = withBadges.match(regex) || [];
     withBadges = withBadges.replace(regex, replacement);
     totalReplacements += matches.length;
@@ -1003,10 +1013,87 @@ async function writeTsConfig(tmpDir, includePath = "concat.ts") {
     entrypoint
   };
 }
-var badgeConfig = {
-  "@lib/recordings": "![pill](https://img.shields.io/badge/Lib-Recordings-FF746C)<br>",
-  "@lib/transcription": "![pill](https://img.shields.io/badge/Lib-Transcription-26c6da)<br>"
-};
+async function findGitRoot(startPath) {
+  let currentPath = resolve3(startPath);
+  while (currentPath !== "/") {
+    try {
+      const gitPath = join3(currentPath, ".git");
+      const stat = await Deno.stat(gitPath);
+      if (stat.isDirectory) {
+        return currentPath;
+      }
+    } catch {
+    }
+    const parentPath = dirname3(currentPath);
+    if (parentPath === currentPath) {
+      break;
+    }
+    currentPath = parentPath;
+  }
+  return null;
+}
+var cachedBadgeConfig = null;
+var badgeConfigPath = null;
+var badgeConfigWatcher = null;
+async function loadBadgeConfig(workingDir) {
+  if (cachedBadgeConfig !== null) {
+    return cachedBadgeConfig;
+  }
+  const defaultBadgeConfig = {
+    "@lib/recordings": {
+      content: "Lib-Recordings",
+      color: "FF746C",
+      type: "pill"
+    },
+    "@lib/transcription": {
+      content: "Lib-Transcription",
+      color: "26c6da",
+      type: "pill"
+    }
+  };
+  const gitRoot = await findGitRoot(workingDir);
+  if (gitRoot) {
+    badgeConfigPath = join3(gitRoot, "lib-tags.json");
+    try {
+      const configContent = await Deno.readTextFile(badgeConfigPath);
+      cachedBadgeConfig = JSON.parse(configContent);
+      console.log(`\u2713 Loaded badge config from: ${badgeConfigPath}`);
+      return cachedBadgeConfig;
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        console.log(`\u2139 Using default badge config (no lib-tags.json found at git root)`);
+      } else {
+        console.warn(`\u26A0 Error loading lib-tags.json: ${error.message}`);
+      }
+    }
+  }
+  cachedBadgeConfig = defaultBadgeConfig;
+  return cachedBadgeConfig;
+}
+async function watchBadgeConfig(onUpdate) {
+  if (!badgeConfigPath) return;
+  if (badgeConfigWatcher) {
+    try {
+      badgeConfigWatcher.close();
+    } catch {
+    }
+  }
+  try {
+    badgeConfigWatcher = Deno.watchFs(badgeConfigPath);
+    console.log(`\u{1F441} Watching badge config: ${badgeConfigPath}`);
+    for await (const event of badgeConfigWatcher) {
+      if (event.kind === "modify" || event.kind === "create") {
+        cachedBadgeConfig = null;
+        console.log(`\u{1F504} Badge config changed, reloading...`);
+        const workingDir = dirname3(badgeConfigPath);
+        await loadBadgeConfig(workingDir);
+        onUpdate();
+      }
+    }
+  } catch (error) {
+    console.warn(`\u26A0 Could not watch badge config: ${error.message}`);
+  }
+}
 async function processHtmlFiles(dir, customCssContent, customJsContent) {
   for await (const entry of Deno.readDir(dir)) {
     const fullPath = join3(dir, entry.name);
@@ -1134,13 +1221,13 @@ if (import.meta.main) {
   });
   console.log(`Using directory structure: ${tmpdir}`);
   let watchedFiles = [];
-  const buildDocs = async () => {
+  const buildDocs = async (badgeConfig2) => {
     const outts2 = join3(tmpdir, "concat.ts");
     const { content, files, externalImports } = await concat(entry);
     const stubs = generateVerboseStubs(externalImports);
     const denoGlobals = generateDenoGlobals();
     let finalContent = content + denoGlobals + stubs;
-    finalContent = addBadges(finalContent);
+    finalContent = addBadges(finalContent, badgeConfig2);
     await Deno.writeTextFile(outts2, finalContent);
     watchedFiles = [
       ...files,
@@ -1148,7 +1235,9 @@ if (import.meta.main) {
     ];
     return outts2;
   };
-  const outts = await buildDocs();
+  const workingDir = dirname3(resolve3(entry));
+  const badgeConfig = await loadBadgeConfig(workingDir);
+  const outts = await buildDocs(badgeConfig);
   const cwd = Deno.cwd();
   const parentFolderName = cwd.split("/").filter(Boolean).pop() || "Docs";
   const titleCase = parentFolderName.split(/[-_]/).map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(" ");
@@ -1295,7 +1384,7 @@ ${mermaidEnd}`;
       return null;
     }
   };
-  const extractEntrypoints = async (concatPath) => {
+  const extractEntrypoints = async (concatPath, badgeConfig2) => {
     const content = await Deno.readTextFile(concatPath);
     const lines = content.split("\n");
     const entrypointBlocks = [];
@@ -1357,7 +1446,7 @@ ${mermaidEnd}`;
   };
   const rebuildAndProcess = async () => {
     let readmeContent = null;
-    const entrypointBlocks = await extractEntrypoints(outts);
+    const entrypointBlocks = await extractEntrypoints(outts, badgeConfig);
     const { filePath, entrypoint } = await writeTsConfig(tmpdir);
     const tdCommand = new Deno.Command("sh", {
       args: [
@@ -1503,6 +1592,36 @@ ${mermaidEnd}`;
   if (watchMode) {
     let debounceTimer;
     let watcherController = null;
+    await watchBadgeConfig(async () => {
+      console.log("Badge configuration changed, reloading...");
+      cachedBadgeConfig = null;
+      const newBadgeConfig = await loadBadgeConfig(workingDir);
+      Object.assign(badgeConfig, newBadgeConfig);
+      const rebuild2 = async () => {
+        console.log("\nBadge config changed, rebuilding...");
+        try {
+          const oldFileCount = watchedFiles.length;
+          const newOutts = await buildDocs(badgeConfig);
+          const success = await rebuildAndProcess();
+          if (success) {
+            if (wsServer) {
+              wsServer.broadcast({
+                type: "reload"
+              });
+            }
+            const newFileCount = watchedFiles.length;
+            if (newFileCount !== oldFileCount) {
+              console.log(`Bundle size changed: ${oldFileCount} \u2192 ${newFileCount} files`);
+              await startWatcher();
+            }
+          }
+        } catch (error) {
+          console.error("Rebuild failed:", error);
+        }
+      };
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(rebuild2, 300);
+    });
     const startWatcher = async () => {
       if (watcherController) {
         watcherController.abort();
@@ -1536,7 +1655,7 @@ ${mermaidEnd}`;
       console.log("\nFiles changed, rebuilding...");
       try {
         const oldFileCount = watchedFiles.length;
-        const newOutts = await buildDocs();
+        const newOutts = await buildDocs(badgeConfig);
         const success = await rebuildAndProcess();
         if (success) {
           console.log("Rebuild complete, reloading browser...");

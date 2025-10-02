@@ -1,0 +1,22 @@
+{
+  "@lib/recordings": {
+    "content": "Audio-Recordings",
+    "color": "FF0000",
+    "type": "pill"
+  },
+  "@lib/transcription": {
+    "content": "Speech-to-Text",
+    "color": "00FF00",
+    "type": "pill"
+  },
+  "@lib/custom": {
+    "content": "Custom-Module",
+    "color": "0000FF",
+    "type": "pill"
+  },
+  "@lib/full-example": {
+    "content": "This is replaced as full text",
+    "type": "full"
+  }
+}
+
