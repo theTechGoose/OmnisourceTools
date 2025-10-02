@@ -52,6 +52,6 @@ BIN_PATH="$(pwd)/$(dirname -- $1)/exe.js"
 (echo '#!/usr/bin/env deno run --no-check -A'; deno bundle $1) > "$BIN_PATH"
 chmod +x "$BIN_PATH"
 BIN_DIR=$(last_colon_field $PATH)
-FULL_PATH="$BIN_DIR/$(slash_field $1 -1)"
+FULL_PATH="$BIN_DIR/$(slash_field $1 -2)"
 echo "Linking $FULL_PATH"
 cp "$BIN_PATH"  "$FULL_PATH"

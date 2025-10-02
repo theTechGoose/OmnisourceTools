@@ -278,7 +278,28 @@ function join3(...paths) {
   return isWindows ? join(...paths) : join2(...paths);
 }
 
-// mod.ts
+// src/tdoc/mod.ts
+async function writeTsConfig(tmpDir, includePath = "concat.ts") {
+  const entrypoint = join3(tmpDir, includePath);
+  const config = {
+    compilerOptions: {
+      target: "ES2020",
+      lib: [
+        "ES2020",
+        "DOM"
+      ]
+    },
+    include: [
+      entrypoint
+    ]
+  };
+  const filePath = `${tmpDir}/tsconfig.json`;
+  await Deno.writeTextFile(filePath, JSON.stringify(config, null, 2));
+  return {
+    filePath,
+    entrypoint
+  };
+}
 var badgeConfig = {
   "@lib/recordings": "![pill](https://img.shields.io/badge/Lib-Recordings-FF746C)<br>",
   "@lib/transcription": "![pill](https://img.shields.io/badge/Lib-Transcription-26c6da)<br>"
@@ -376,6 +397,37 @@ async function concat(entry, outPath) {
     totalReplacements += matches.length;
   }
   await Deno.writeTextFile(outPath, withBadges);
+  const dnt = "jsr:@deno/dnt";
+  const { emit } = await import(dnt);
+  const { files } = await emit({
+    entryPoints: [
+      outPath
+    ],
+    shims: {
+      deno: true
+    },
+    typeCheck: "both",
+    compilerOptions: {
+      lib: [
+        "ES2022",
+        "DOM"
+      ],
+      module: "NodeNext",
+      moduleResolution: "NodeNext",
+      target: "ES2022",
+      skipLibCheck: true
+    },
+    package: {
+      name: "typedoc-shadow",
+      version: "0.0.0"
+    }
+  });
+  console.log(Object.keys(files.toObject()));
+  const [singleOutputFile] = Object.values(files.toObject());
+  await Deno.writeTextFile(outPath, singleOutputFile);
+  for (const [path, text] of files) {
+    console.log(path, text.slice(0, 200));
+  }
   console.log(`\u2713 Generated concat.ts at: ${outPath}`);
   if (totalReplacements > 0) {
     console.log(`Replaced ${totalReplacements} badge patterns`);
@@ -539,7 +591,7 @@ if (import.meta.main) {
     })();
   ` : "";
   const customJsContent = `
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"><\/script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script>
 (function() {
   // Check if user has a saved preference
@@ -568,7 +620,7 @@ if (import.meta.main) {
   }
   ${hotReloadScript}
 })();
-<\/script>`;
+</script>`;
   const customCssContent = `
 <style>
 /* Hide ALL original footer content */
@@ -709,10 +761,11 @@ ${mermaidEnd}`;
   const rebuildAndProcess = async () => {
     let readmeContent = await extractReadmeFromComment(outts);
     const entrypointBlocks = await extractEntrypoints(outts);
+    const { filePath, entrypoint } = await writeTsConfig(tmpdir);
     const tdCommand = new Deno.Command("sh", {
       args: [
         "-c",
-        `cd ${tmpdir} && npx -p varvara-typedoc-theme -p typedoc-plugin-mermaid typedoc --plugin varvara-typedoc-theme --plugin typedoc-plugin-mermaid --theme varvara-css --name "${docsTitle}" --out typedoc concat.ts --customFooterHtml "\xA9 Rafa 2025" --categorizeByGroup true --defaultCategory "Data" --readme none`
+        `cd ${tmpdir} && npx -p varvara-typedoc-theme -p typedoc-plugin-mermaid typedoc --plugin varvara-typedoc-theme --plugin typedoc-plugin-mermaid --theme varvara-css --name "${docsTitle}" --out typedoc ${entrypoint} --tsconfig ${filePath} --customFooterHtml "\xA9 Rafa 2025" --categorizeByGroup true --defaultCategory "Data" --readme none`
       ],
       stdout: "inherit",
       stderr: "inherit"
@@ -935,3 +988,6 @@ ${mermaidEnd}`;
   }
   console.log("Cleanup complete.");
 }
+export {
+  writeTsConfig
+};

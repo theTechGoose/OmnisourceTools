@@ -11,6 +11,24 @@
  */
 
 import { join } from "https://deno.land/std@0.224.0/path/mod.ts";
+import { dirname } from "node:path";
+export async function writeTsConfig(
+  tmpDir: string,
+  includePath = "concat.ts",
+): Promise<{ filePath: string; entrypoint: string }> {
+  const entrypoint = join(tmpDir, includePath);
+  const config = {
+    compilerOptions: {
+      target: "ES2020",
+      lib: ["ES2020", "DOM"],
+    },
+    include: [entrypoint],
+  };
+
+  const filePath = `${tmpDir}/tsconfig.json`;
+  await Deno.writeTextFile(filePath, JSON.stringify(config, null, 2));
+  return { filePath, entrypoint };
+}
 
 // Badge replacement configuration
 // Define patterns and their replacements using positional variables ($1, $2, etc.)
@@ -73,7 +91,8 @@ async function concat(entry: string, outPath: string): Promise<string[]> {
     const m = bySpec.get(spec);
     if (!m) return;
     for (const d of m.dependencies ?? []) {
-      const child = d.code?.specifier ??
+      const child =
+        d.code?.specifier ??
         d.type?.specifier ??
         d.maybeCode?.specifier ??
         d.specifier;
@@ -149,6 +168,33 @@ async function concat(entry: string, outPath: string): Promise<string[]> {
   }
 
   await Deno.writeTextFile(outPath, withBadges);
+  const dnt = "jsr:@deno/dnt";
+  const { emit } = await import(dnt);
+
+  // Use deno_emit to bundle the concatenated file into a single file
+
+  const { files } = await emit({
+    entryPoints: [outPath],
+    shims: { deno: true },
+    typeCheck: "both",
+    compilerOptions: {
+      lib: ["ES2022", "DOM"],
+      module: "NodeNext",
+      moduleResolution: "NodeNext",
+      target: "ES2022",
+      skipLibCheck: true,
+    },
+    package: { name: "typedoc-shadow", version: "0.0.0" },
+  });
+  console.log(Object.keys(files.toObject()));
+
+  const [singleOutputFile] = Object.values(files.toObject());
+  await Deno.writeTextFile(outPath, singleOutputFile as unknown as string);
+
+  // Now `files` is a Map<path,text>
+  for (const [path, text] of files) {
+    console.log(path, text.slice(0, 200)); // just preview text
+  }
   console.log(`✓ Generated concat.ts at: ${outPath}`);
 
   // Show a preview if badges were replaced
@@ -580,10 +626,13 @@ footer .container::after {
     // We'll inject them as proper HTML after TypeDoc processes everything
 
     // Run typedoc on the modified concat.ts (without entrypoints)
+    //   \
+    const { filePath, entrypoint } = await writeTsConfig(tmpdir);
+
     const tdCommand = new Deno.Command("sh", {
       args: [
         "-c",
-        `cd ${tmpdir} && npx -p varvara-typedoc-theme -p typedoc-plugin-mermaid typedoc --plugin varvara-typedoc-theme --plugin typedoc-plugin-mermaid --theme varvara-css --name "${docsTitle}" --out typedoc concat.ts --customFooterHtml "© Rafa 2025" --categorizeByGroup true --defaultCategory "Data" --readme none`,
+        `cd ${tmpdir} && npx -p varvara-typedoc-theme -p typedoc-plugin-mermaid typedoc --plugin varvara-typedoc-theme --plugin typedoc-plugin-mermaid --theme varvara-css --name "${docsTitle}" --out typedoc ${entrypoint} --tsconfig ${filePath} --customFooterHtml "© Rafa 2025" --categorizeByGroup true --defaultCategory "Data" --readme none`,
       ],
       stdout: "inherit",
       stderr: "inherit",
@@ -650,7 +699,8 @@ footer .container::after {
             ${readmeHtml}
           </div>
         `;
-        indexContent = indexContent.slice(0, insertPos) +
+        indexContent =
+          indexContent.slice(0, insertPos) +
           readmeSection +
           indexContent.slice(insertPos);
         await Deno.writeTextFile(indexPath, indexContent);
@@ -731,7 +781,8 @@ footer .container::after {
       }
 
       if (insertionPoint > -1) {
-        indexContent = indexContent.slice(0, insertionPoint) +
+        indexContent =
+          indexContent.slice(0, insertionPoint) +
           entrypointsHtml +
           indexContent.slice(insertionPoint);
 
@@ -816,13 +867,14 @@ footer .container::after {
       console.log(`Watching ${watchedFiles.length} files from the bundle...`);
 
       // Watch only the files that are included in the bundle
+      //@ts-ignore: dooks
       const watcher = Deno.watchFs(watchedFiles, { signal });
 
       try {
         for await (const event of watcher) {
           // Check if any of the changed files are in our watched list
           const relevantChange = event.paths.some((path) =>
-            watchedFiles.includes(path)
+            watchedFiles.includes(path),
           );
 
           if (!relevantChange) continue;
