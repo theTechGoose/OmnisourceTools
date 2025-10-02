@@ -16,12 +16,121 @@ var CHAR_FORWARD_SLASH = 47;
 var CHAR_BACKWARD_SLASH = 92;
 var CHAR_COLON = 58;
 
+// deno:https://deno.land/std@0.224.0/path/_common/strip_trailing_separators.ts
+function stripTrailingSeparators(segment, isSep) {
+  if (segment.length <= 1) {
+    return segment;
+  }
+  let end = segment.length;
+  for (let i = segment.length - 1; i > 0; i--) {
+    if (isSep(segment.charCodeAt(i))) {
+      end = i;
+    } else {
+      break;
+    }
+  }
+  return segment.slice(0, end);
+}
+
 // deno:https://deno.land/std@0.224.0/path/windows/_util.ts
+function isPosixPathSeparator(code) {
+  return code === CHAR_FORWARD_SLASH;
+}
 function isPathSeparator(code) {
   return code === CHAR_FORWARD_SLASH || code === CHAR_BACKWARD_SLASH;
 }
 function isWindowsDeviceRoot(code) {
   return code >= CHAR_LOWERCASE_A && code <= CHAR_LOWERCASE_Z || code >= CHAR_UPPERCASE_A && code <= CHAR_UPPERCASE_Z;
+}
+
+// deno:https://deno.land/std@0.224.0/path/_common/dirname.ts
+function assertArg(path) {
+  assertPath(path);
+  if (path.length === 0) return ".";
+}
+
+// deno:https://deno.land/std@0.224.0/path/windows/dirname.ts
+function dirname(path) {
+  assertArg(path);
+  const len = path.length;
+  let rootEnd = -1;
+  let end = -1;
+  let matchedSlash = true;
+  let offset = 0;
+  const code = path.charCodeAt(0);
+  if (len > 1) {
+    if (isPathSeparator(code)) {
+      rootEnd = offset = 1;
+      if (isPathSeparator(path.charCodeAt(1))) {
+        let j = 2;
+        let last = j;
+        for (; j < len; ++j) {
+          if (isPathSeparator(path.charCodeAt(j))) break;
+        }
+        if (j < len && j !== last) {
+          last = j;
+          for (; j < len; ++j) {
+            if (!isPathSeparator(path.charCodeAt(j))) break;
+          }
+          if (j < len && j !== last) {
+            last = j;
+            for (; j < len; ++j) {
+              if (isPathSeparator(path.charCodeAt(j))) break;
+            }
+            if (j === len) {
+              return path;
+            }
+            if (j !== last) {
+              rootEnd = offset = j + 1;
+            }
+          }
+        }
+      }
+    } else if (isWindowsDeviceRoot(code)) {
+      if (path.charCodeAt(1) === CHAR_COLON) {
+        rootEnd = offset = 2;
+        if (len > 2) {
+          if (isPathSeparator(path.charCodeAt(2))) rootEnd = offset = 3;
+        }
+      }
+    }
+  } else if (isPathSeparator(code)) {
+    return path;
+  }
+  for (let i = len - 1; i >= offset; --i) {
+    if (isPathSeparator(path.charCodeAt(i))) {
+      if (!matchedSlash) {
+        end = i;
+        break;
+      }
+    } else {
+      matchedSlash = false;
+    }
+  }
+  if (end === -1) {
+    if (rootEnd === -1) return ".";
+    else end = rootEnd;
+  }
+  return stripTrailingSeparators(path.slice(0, end), isPosixPathSeparator);
+}
+
+// deno:https://deno.land/std@0.224.0/path/_common/from_file_url.ts
+function assertArg3(url) {
+  url = url instanceof URL ? url : new URL(url);
+  if (url.protocol !== "file:") {
+    throw new TypeError("Must be a file URL.");
+  }
+  return url;
+}
+
+// deno:https://deno.land/std@0.224.0/path/windows/from_file_url.ts
+function fromFileUrl(url) {
+  url = assertArg3(url);
+  let path = decodeURIComponent(url.pathname.replace(/\//g, "\\").replace(/%(?![0-9A-Fa-f]{2})/g, "%25")).replace(/^\\*([A-Za-z]:)(\\|$)/, "$1\\");
+  if (url.hostname !== "") {
+    path = `\\\\${url.hostname}${path}`;
+  }
+  return path;
 }
 
 // deno:https://deno.land/std@0.224.0/assert/assertion_error.ts
@@ -226,9 +335,131 @@ function join(...paths) {
   return normalize(joined);
 }
 
+// deno:https://deno.land/std@0.224.0/path/windows/resolve.ts
+function resolve(...pathSegments) {
+  let resolvedDevice = "";
+  let resolvedTail = "";
+  let resolvedAbsolute = false;
+  for (let i = pathSegments.length - 1; i >= -1; i--) {
+    let path;
+    const { Deno: Deno2 } = globalThis;
+    if (i >= 0) {
+      path = pathSegments[i];
+    } else if (!resolvedDevice) {
+      if (typeof Deno2?.cwd !== "function") {
+        throw new TypeError("Resolved a drive-letter-less path without a CWD.");
+      }
+      path = Deno2.cwd();
+    } else {
+      if (typeof Deno2?.env?.get !== "function" || typeof Deno2?.cwd !== "function") {
+        throw new TypeError("Resolved a relative path without a CWD.");
+      }
+      path = Deno2.cwd();
+      if (path === void 0 || path.slice(0, 3).toLowerCase() !== `${resolvedDevice.toLowerCase()}\\`) {
+        path = `${resolvedDevice}\\`;
+      }
+    }
+    assertPath(path);
+    const len = path.length;
+    if (len === 0) continue;
+    let rootEnd = 0;
+    let device = "";
+    let isAbsolute3 = false;
+    const code = path.charCodeAt(0);
+    if (len > 1) {
+      if (isPathSeparator(code)) {
+        isAbsolute3 = true;
+        if (isPathSeparator(path.charCodeAt(1))) {
+          let j = 2;
+          let last = j;
+          for (; j < len; ++j) {
+            if (isPathSeparator(path.charCodeAt(j))) break;
+          }
+          if (j < len && j !== last) {
+            const firstPart = path.slice(last, j);
+            last = j;
+            for (; j < len; ++j) {
+              if (!isPathSeparator(path.charCodeAt(j))) break;
+            }
+            if (j < len && j !== last) {
+              last = j;
+              for (; j < len; ++j) {
+                if (isPathSeparator(path.charCodeAt(j))) break;
+              }
+              if (j === len) {
+                device = `\\\\${firstPart}\\${path.slice(last)}`;
+                rootEnd = j;
+              } else if (j !== last) {
+                device = `\\\\${firstPart}\\${path.slice(last, j)}`;
+                rootEnd = j;
+              }
+            }
+          }
+        } else {
+          rootEnd = 1;
+        }
+      } else if (isWindowsDeviceRoot(code)) {
+        if (path.charCodeAt(1) === CHAR_COLON) {
+          device = path.slice(0, 2);
+          rootEnd = 2;
+          if (len > 2) {
+            if (isPathSeparator(path.charCodeAt(2))) {
+              isAbsolute3 = true;
+              rootEnd = 3;
+            }
+          }
+        }
+      }
+    } else if (isPathSeparator(code)) {
+      rootEnd = 1;
+      isAbsolute3 = true;
+    }
+    if (device.length > 0 && resolvedDevice.length > 0 && device.toLowerCase() !== resolvedDevice.toLowerCase()) {
+      continue;
+    }
+    if (resolvedDevice.length === 0 && device.length > 0) {
+      resolvedDevice = device;
+    }
+    if (!resolvedAbsolute) {
+      resolvedTail = `${path.slice(rootEnd)}\\${resolvedTail}`;
+      resolvedAbsolute = isAbsolute3;
+    }
+    if (resolvedAbsolute && resolvedDevice.length > 0) break;
+  }
+  resolvedTail = normalizeString(resolvedTail, !resolvedAbsolute, "\\", isPathSeparator);
+  return resolvedDevice + (resolvedAbsolute ? "\\" : "") + resolvedTail || ".";
+}
+
 // deno:https://deno.land/std@0.224.0/path/posix/_util.ts
 function isPosixPathSeparator2(code) {
   return code === CHAR_FORWARD_SLASH;
+}
+
+// deno:https://deno.land/std@0.224.0/path/posix/dirname.ts
+function dirname2(path) {
+  assertArg(path);
+  let end = -1;
+  let matchedNonSeparator = false;
+  for (let i = path.length - 1; i >= 1; --i) {
+    if (isPosixPathSeparator2(path.charCodeAt(i))) {
+      if (matchedNonSeparator) {
+        end = i;
+        break;
+      }
+    } else {
+      matchedNonSeparator = true;
+    }
+  }
+  if (end === -1) {
+    return isPosixPathSeparator2(path.charCodeAt(0)) ? "/" : ".";
+  }
+  return stripTrailingSeparators(path.slice(0, end), isPosixPathSeparator2);
+}
+
+// deno:https://deno.land/std@0.224.0/path/posix/from_file_url.ts
+function fromFileUrl2(url) {
+  url = assertArg3(url);
+  return decodeURIComponent(url.pathname.replace(/%(?![0-9A-Fa-f]{2})/g, "%25"));
 }
 
 // deno:https://deno.land/std@0.224.0/path/posix/normalize.ts
@@ -259,6 +490,35 @@ function join2(...paths) {
   return normalize2(joined);
 }
 
+// deno:https://deno.land/std@0.224.0/path/posix/resolve.ts
+function resolve2(...pathSegments) {
+  let resolvedPath = "";
+  let resolvedAbsolute = false;
+  for (let i = pathSegments.length - 1; i >= -1 && !resolvedAbsolute; i--) {
+    let path;
+    if (i >= 0) path = pathSegments[i];
+    else {
+      const { Deno: Deno2 } = globalThis;
+      if (typeof Deno2?.cwd !== "function") {
+        throw new TypeError("Resolved a relative path without a CWD.");
+      }
+      path = Deno2.cwd();
+    }
+    assertPath(path);
+    if (path.length === 0) {
+      continue;
+    }
+    resolvedPath = `${path}/${resolvedPath}`;
+    resolvedAbsolute = isPosixPathSeparator2(path.charCodeAt(0));
+  }
+  resolvedPath = normalizeString(resolvedPath, !resolvedAbsolute, "/", isPosixPathSeparator2);
+  if (resolvedAbsolute) {
+    if (resolvedPath.length > 0) return `/${resolvedPath}`;
+    else return "/";
+  } else if (resolvedPath.length > 0) return resolvedPath;
+  else return ".";
+}
+
 // deno:https://deno.land/std@0.224.0/path/_os.ts
 var osType = (() => {
   const { Deno: Deno2 } = globalThis;
@@ -273,12 +533,186 @@ var osType = (() => {
 })();
 var isWindows = osType === "windows";
 
+// deno:https://deno.land/std@0.224.0/path/dirname.ts
+function dirname3(path) {
+  return isWindows ? dirname(path) : dirname2(path);
+}
+
+// deno:https://deno.land/std@0.224.0/path/from_file_url.ts
+function fromFileUrl3(url) {
+  return isWindows ? fromFileUrl(url) : fromFileUrl2(url);
+}
+
 // deno:https://deno.land/std@0.224.0/path/join.ts
 function join3(...paths) {
   return isWindows ? join(...paths) : join2(...paths);
 }
 
+// deno:https://deno.land/std@0.224.0/path/resolve.ts
+function resolve3(...pathSegments) {
+  return isWindows ? resolve(...pathSegments) : resolve2(...pathSegments);
+}
+
 // src/tdoc/mod.ts
+async function findNearestDenoConfig(startPath) {
+  let dir = (await Deno.stat(startPath)).isDirectory ? resolve3(startPath) : dirname3(resolve3(startPath));
+  while (true) {
+    const jsonPath = join3(dir, "deno.json");
+    const jsoncPath = join3(dir, "deno.jsonc");
+    if (await exists(jsonPath)) return jsonPath;
+    if (await exists(jsoncPath)) return jsoncPath;
+    const parent = dirname3(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+async function exists(path) {
+  try {
+    await Deno.lstat(path);
+    return true;
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) return false;
+    throw err;
+  }
+}
+async function getGitRoot() {
+  const cmd = new Deno.Command("git", {
+    args: [
+      "rev-parse",
+      "--show-toplevel"
+    ],
+    stdout: "piped",
+    stderr: "piped"
+  });
+  const { code, stdout, stderr } = await cmd.output();
+  if (code !== 0) {
+    throw new Error(`git rev-parse failed: ${new TextDecoder().decode(stderr)}`);
+  }
+  return resolve3(new TextDecoder().decode(stdout).trim());
+}
+async function getLocalTsDeps(entryTsFile) {
+  const denoExe = Deno.execPath();
+  const entryAbs = resolve3(entryTsFile);
+  const rootAbs = await getGitRoot();
+  const cmd = new Deno.Command(denoExe, {
+    args: [
+      "info",
+      "--json",
+      entryAbs
+    ],
+    stdout: "piped",
+    stderr: "piped"
+  });
+  const { code, stdout, stderr } = await cmd.output();
+  if (code !== 0) {
+    throw new Error(new TextDecoder().decode(stderr));
+  }
+  const info = JSON.parse(new TextDecoder().decode(stdout));
+  const modules = info.modules ?? [];
+  const isTsLike = (p) => /\.(mts|cts|ts|tsx)$/i.test(p);
+  const results = /* @__PURE__ */ new Set();
+  for (const m of modules) {
+    if (!m.local || !m.local.startsWith("file://")) continue;
+    const localPath = fromFileUrl3(m.local);
+    if (!localPath.startsWith(rootAbs + "/") && localPath !== rootAbs) continue;
+    if (localPath.includes("/node_modules/")) continue;
+    if (!isTsLike(localPath)) continue;
+    if (localPath === entryAbs) continue;
+    try {
+      const st = await Deno.stat(localPath);
+      if (!st.isFile) continue;
+      results.add(localPath);
+    } catch {
+    }
+  }
+  return [
+    ...results
+  ].sort();
+}
+async function dntBuildFromString(source, outFile, denoConfigPath) {
+  const dnt = "jsr:@deno/dnt";
+  const { build, emptyDir } = await import(dnt);
+  const tmpDir = await Deno.makeTempDir();
+  try {
+    const entry = join3(tmpDir, "entry.ts");
+    await Deno.writeTextFile(entry, source);
+    const outDir = join3(tmpDir, "npm");
+    await emptyDir(outDir);
+    let mappings = {};
+    if (await exists(denoConfigPath)) {
+      const config = JSON.parse(await Deno.readTextFile(denoConfigPath));
+      const imports = config.imports;
+      if (imports) {
+        mappings = Object.fromEntries(Object.entries(imports).map(([k, v]) => [
+          k,
+          npmMappingFromUrl(v)
+        ]));
+      }
+    }
+    await build({
+      entryPoints: [
+        entry
+      ],
+      outDir,
+      test: false,
+      typeCheck: false,
+      shims: {
+        deno: true
+      },
+      mappings,
+      package: {
+        name: "temp-build",
+        version: "0.0.0",
+        type: "module"
+      },
+      compilerOptions: {
+        target: "ES2020",
+        lib: [
+          "ES2020",
+          "DOM"
+        ]
+      }
+    });
+    const jsFile = join3(outDir, "esm", "entry.js");
+    const dtsFile = join3(outDir, "types", "entry.d.ts");
+    const js = await Deno.readTextFile(jsFile);
+    const dts = await Deno.readTextFile(dtsFile);
+    await Deno.writeTextFile(outFile, `${js}
+
+/* --- Type Declarations --- */
+${dts}`);
+  } finally {
+    try {
+      await Deno.remove(tmpDir, {
+        recursive: true
+      });
+    } catch {
+    }
+  }
+}
+function npmMappingFromUrl(url) {
+  if (url.startsWith("npm:")) {
+    const spec = url.slice(4);
+    const [name, version = "latest"] = spec.split("@");
+    return {
+      name,
+      version
+    };
+  }
+  if (url.startsWith("jsr:@")) {
+    const spec = url.slice(5);
+    const [name, version = "latest"] = spec.split("@");
+    return {
+      name,
+      version
+    };
+  }
+  return {
+    name: url,
+    version: "latest"
+  };
+}
 async function writeTsConfig(tmpDir, includePath = "concat.ts") {
   const entrypoint = join3(tmpDir, includePath);
   const config = {
@@ -299,142 +733,6 @@ async function writeTsConfig(tmpDir, includePath = "concat.ts") {
     filePath,
     entrypoint
   };
-}
-var badgeConfig = {
-  "@lib/recordings": "![pill](https://img.shields.io/badge/Lib-Recordings-FF746C)<br>",
-  "@lib/transcription": "![pill](https://img.shields.io/badge/Lib-Transcription-26c6da)<br>"
-};
-function stripImportsAndDecoratorCalls(source) {
-  let out = source;
-  const importRegex = /^\s*import\s*(?:type\s+)?(?:\s*\{[\s\S]*?\}|\s+[\w$]+|\s*\*\s+as\s+[\w$]+|\s+[\w$]+\s*,\s*\{[\s\S]*?\})\s*from\s*["'][^"']+["']\s*;?\s*(?:\/\/[^\n]*)?\s*$/gm;
-  out = out.split(importRegex).join("");
-  const decoratorRegex = /^\s*@[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*\([^()\n]*\))?\s*$/gm;
-  out = out.split(decoratorRegex).join("");
-  const exportRegex = /^\s*export\s+(?:\{[\s\S]*?\}|\*\s+from\s+["'][^"']+["']|default\s+)?\s*;?\s*(?:\/\/[^\n]*)?\s*$/gm;
-  out = out.split(exportRegex).join("");
-  return out;
-}
-async function concat(entry, outPath) {
-  const command = new Deno.Command("deno", {
-    args: [
-      "info",
-      "--json",
-      entry
-    ],
-    stdout: "piped",
-    stderr: "inherit"
-  });
-  const { stdout } = await command.output();
-  const raw = new TextDecoder().decode(stdout);
-  const graph = JSON.parse(raw);
-  const bySpec = new Map(graph.modules.map((m) => [
-    m.specifier,
-    m
-  ]));
-  const visited = /* @__PURE__ */ new Set();
-  const order = [];
-  const includedFiles = [];
-  function visit(spec) {
-    if (!spec || visited.has(spec)) return;
-    visited.add(spec);
-    const m = bySpec.get(spec);
-    if (!m) return;
-    for (const d of m.dependencies ?? []) {
-      const child = d.code?.specifier ?? d.type?.specifier ?? d.maybeCode?.specifier ?? d.specifier;
-      visit(child);
-    }
-    order.push(spec);
-  }
-  for (const r of graph.roots ?? []) visit(r);
-  if (order.length === 0 && graph.modules?.[0]) {
-    visit(graph.modules[0].specifier);
-  }
-  const includeRemote = Deno.env.get("INCLUDE_REMOTE") === "1";
-  const includeJs = Deno.env.get("INCLUDE_JS") === "1";
-  const mediaOk = /* @__PURE__ */ new Set([
-    "TypeScript",
-    "TSX",
-    ...includeJs ? [
-      "JavaScript",
-      "JSX"
-    ] : []
-  ]);
-  let out = "";
-  for (const spec of order) {
-    const m = bySpec.get(spec);
-    if (!m) continue;
-    const isFile = (m.local ?? "").startsWith("/");
-    if (!isFile && !includeRemote) continue;
-    if (!m.mediaType || !mediaOk.has(m.mediaType)) continue;
-    try {
-      if (!m.local) continue;
-      const src = await Deno.readTextFile(m.local);
-      if (isFile) {
-        includedFiles.push(m.local);
-      }
-      out += `
-// =============================================
-`;
-      out += `// Source: ${spec}
-`;
-      out += `// Local:  ${m.local}
-`;
-      out += `// Media:  ${m.mediaType}
-`;
-      out += `// =============================================
-
-`;
-      out += src + "\n";
-    } catch {
-    }
-    out = stripImportsAndDecoratorCalls(out);
-  }
-  const removedImports = out.split("\n").map((line) => line.includes("import") ? "" : line).filter(Boolean).join("\n");
-  let withBadges = removedImports;
-  let totalReplacements = 0;
-  for (const [pattern, replacement] of Object.entries(badgeConfig)) {
-    const regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
-    const matches = withBadges.match(regex) || [];
-    withBadges = withBadges.replace(regex, replacement);
-    totalReplacements += matches.length;
-  }
-  await Deno.writeTextFile(outPath, withBadges);
-  const dnt = "jsr:@deno/dnt";
-  const { emit } = await import(dnt);
-  const { files } = await emit({
-    entryPoints: [
-      outPath
-    ],
-    shims: {
-      deno: true
-    },
-    typeCheck: "both",
-    compilerOptions: {
-      lib: [
-        "ES2022",
-        "DOM"
-      ],
-      module: "NodeNext",
-      moduleResolution: "NodeNext",
-      target: "ES2022",
-      skipLibCheck: true
-    },
-    package: {
-      name: "typedoc-shadow",
-      version: "0.0.0"
-    }
-  });
-  console.log(Object.keys(files.toObject()));
-  const [singleOutputFile] = Object.values(files.toObject());
-  await Deno.writeTextFile(outPath, singleOutputFile);
-  for (const [path, text] of files) {
-    console.log(path, text.slice(0, 200));
-  }
-  console.log(`\u2713 Generated concat.ts at: ${outPath}`);
-  if (totalReplacements > 0) {
-    console.log(`Replaced ${totalReplacements} badge patterns`);
-  }
-  return includedFiles;
 }
 async function processHtmlFiles(dir, customCssContent, customJsContent) {
   for await (const entry of Deno.readDir(dir)) {
@@ -565,8 +863,10 @@ if (import.meta.main) {
   let watchedFiles = [];
   const buildDocs = async () => {
     const outts2 = join3(tmpdir, "concat.ts");
-    let includedFiles = await concat(entry, outts2);
-    watchedFiles = includedFiles;
+    const configPath = await findNearestDenoConfig(entry);
+    if (!configPath) throw new Error("No deno.json or deno.jsonc found in the project hierarchy");
+    dntBuildFromString(entry, outts2, configPath);
+    watchedFiles = await getLocalTsDeps(entry);
     return outts2;
   };
   const outts = await buildDocs();
@@ -991,5 +1291,9 @@ ${mermaidEnd}`;
   console.log("Cleanup complete.");
 }
 export {
+  dntBuildFromString,
+  findNearestDenoConfig,
+  getGitRoot,
+  getLocalTsDeps,
   writeTsConfig
 };

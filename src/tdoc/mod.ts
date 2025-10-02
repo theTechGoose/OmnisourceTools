@@ -10,8 +10,226 @@
  *   --no-wait      Run in background mode
  */
 
-import { join } from "https://deno.land/std@0.224.0/path/mod.ts";
-import { dirname } from "node:path";
+import {
+  fromFileUrl,
+  join,
+  resolve,
+  dirname,
+} from "https://deno.land/std@0.224.0/path/mod.ts";
+
+export async function findNearestDenoConfig(
+  startPath: string,
+): Promise<string | null> {
+  let dir = (await Deno.stat(startPath)).isDirectory
+    ? resolve(startPath)
+    : dirname(resolve(startPath));
+
+  while (true) {
+    const jsonPath = join(dir, "deno.json");
+    const jsoncPath = join(dir, "deno.jsonc");
+
+    if (await exists(jsonPath)) return jsonPath;
+    if (await exists(jsoncPath)) return jsoncPath;
+
+    const parent = dirname(dir);
+    if (parent === dir) break; // reached root
+    dir = parent;
+  }
+  return null;
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await Deno.lstat(path);
+    return true;
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) return false;
+    throw err;
+  }
+}
+
+export async function getGitRoot(): Promise<string> {
+  const cmd = new Deno.Command("git", {
+    args: ["rev-parse", "--show-toplevel"],
+    stdout: "piped",
+    stderr: "piped",
+  });
+
+  const { code, stdout, stderr } = await cmd.output();
+  if (code !== 0) {
+    throw new Error(
+      `git rev-parse failed: ${new TextDecoder().decode(stderr)}`,
+    );
+  }
+
+  return resolve(new TextDecoder().decode(stdout).trim());
+}
+
+export async function getLocalTsDeps(entryTsFile: string): Promise<string[]> {
+  const denoExe = Deno.execPath();
+  const entryAbs = resolve(entryTsFile);
+
+  const rootAbs = await getGitRoot();
+
+  const cmd = new Deno.Command(denoExe, {
+    args: ["info", "--json", entryAbs],
+    stdout: "piped",
+    stderr: "piped",
+  });
+
+  const { code, stdout, stderr } = await cmd.output();
+  if (code !== 0) {
+    throw new Error(new TextDecoder().decode(stderr));
+  }
+
+  const info = JSON.parse(new TextDecoder().decode(stdout));
+  // `info.modules` is an array of { specifier, local?, kind, ... }
+  const modules: Array<{ local?: string }> = info.modules ?? [];
+
+  const isTsLike = (p: string) => /\.(mts|cts|ts|tsx)$/i.test(p);
+
+  const results = new Set<string>();
+
+  for (const m of modules) {
+    if (!m.local || !m.local.startsWith("file://")) continue;
+
+    const localPath = fromFileUrl(m.local);
+
+    // Keep only files inside the project root
+    if (!localPath.startsWith(rootAbs + "/") && localPath !== rootAbs) continue;
+
+    // Exclude node_modules
+    if (localPath.includes("/node_modules/")) continue;
+
+    // Keep only TS-like files
+    if (!isTsLike(localPath)) continue;
+
+    // Skip the entry file itself if you only want *dependencies*
+    if (localPath === entryAbs) continue;
+
+    // Ensure it exists (avoid stray cache references)
+    try {
+      const st = await Deno.stat(localPath);
+      if (!st.isFile) continue;
+      results.add(localPath);
+    } catch {
+      // ignore missing
+    }
+  }
+
+  return [...results].sort();
+}
+
+function addBadges(text: string): string {
+  let withBadges = text;
+  let totalReplacements = 0;
+
+  for (const [pattern, replacement] of Object.entries(badgeConfig)) {
+    // Simple string replacement - replace all occurrences of the pattern
+    const regex = new RegExp(
+      pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      "g",
+    );
+    const matches = withBadges.match(regex) || [];
+    withBadges = withBadges.replace(regex, replacement);
+    totalReplacements += matches.length;
+  }
+  return withBadges;
+}
+
+async function copyToClipboard(text: string) {
+  //@ts-ignore
+  const p = Deno.run({
+    cmd: ["pbcopy"], // macOS
+    stdin: "piped",
+  });
+  await p.stdin!.write(new TextEncoder().encode(text));
+  p.stdin!.close();
+  await p.status();
+}
+
+/**
+ * Builds a Node/TypeDoc-friendly JS + DTS from a TS string.
+ * Accepts a denoConfigPath so dnt can resolve imports.
+ */
+export async function dntBuildFromString(
+  source: string,
+  outFile: string,
+  denoConfigPath: string,
+) {
+  const dnt = "jsr:@deno/dnt";
+  const { build, emptyDir } = await import(dnt);
+  const tmpDir = await Deno.makeTempDir();
+
+  try {
+    const entry = join(tmpDir, "entry.ts");
+    await Deno.writeTextFile(entry, source);
+
+    const outDir = join(tmpDir, "npm");
+    await emptyDir(outDir);
+
+    // load deno.json and pull its "imports" for dnt mappings
+    let mappings: Record<string, { name: string; version: string }> = {};
+    if (await exists(denoConfigPath)) {
+      const config = JSON.parse(await Deno.readTextFile(denoConfigPath));
+      const imports = config.imports as Record<string, string> | undefined;
+      if (imports) {
+        mappings = Object.fromEntries(
+          Object.entries(imports).map(([k, v]) => [k, npmMappingFromUrl(v)]),
+        );
+      }
+    }
+
+    await build({
+      entryPoints: [entry],
+      outDir,
+      test: false,
+      typeCheck: false,
+      shims: { deno: true },
+      mappings,
+      package: {
+        name: "temp-build",
+        version: "0.0.0",
+        type: "module",
+      },
+      compilerOptions: {
+        target: "ES2020",
+        lib: ["ES2020", "DOM"],
+      },
+    });
+
+    const jsFile = join(outDir, "esm", "entry.js");
+    const dtsFile = join(outDir, "types", "entry.d.ts");
+
+    const js = await Deno.readTextFile(jsFile);
+    const dts = await Deno.readTextFile(dtsFile);
+
+    await Deno.writeTextFile(
+      outFile,
+      `${js}\n\n/* --- Type Declarations --- */\n${dts}`,
+    );
+  } finally {
+    try {
+      await Deno.remove(tmpDir, { recursive: true });
+    } catch {}
+  }
+}
+
+/** crude helper — convert import URL into npm name/version if it’s jsr/npm */
+function npmMappingFromUrl(url: string): { name: string; version: string } {
+  if (url.startsWith("npm:")) {
+    const spec = url.slice(4);
+    const [name, version = "latest"] = spec.split("@");
+    return { name, version };
+  }
+  if (url.startsWith("jsr:@")) {
+    const spec = url.slice(5);
+    const [name, version = "latest"] = spec.split("@");
+    return { name, version };
+  }
+  return { name: url, version: "latest" };
+}
+
 export async function writeTsConfig(
   tmpDir: string,
   includePath = "concat.ts",
@@ -59,155 +277,123 @@ interface DenoGraph {
 
 function stripImportsAndDecoratorCalls(source: string): string {
   let out: string = source;
-  const importRegex =
-    /^\s*import\s*(?:type\s+)?(?:\s*\{[\s\S]*?\}|\s+[\w$]+|\s*\*\s+as\s+[\w$]+|\s+[\w$]+\s*,\s*\{[\s\S]*?\})\s*from\s*["'][^"']+["']\s*;?\s*(?:\/\/[^\n]*)?\s*$/gm;
-  out = out.split(importRegex).join("");
-  const decoratorRegex =
-    /^\s*@[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*\([^()\n]*\))?\s*$/gm;
+  // const importRegex =
+  //   /^\s*import\s*(?:type\s+)?(?:\s*\{[\s\S]*?\}|\s+[\w$]+|\s*\*\s+as\s+[\w$]+|\s+[\w$]+\s*,\s*\{[\s\S]*?\})\s*from\s*["'][^"']+["']\s*;?\s*(?:\/\/[^\n]*)?\s*$/gm;
+  // out = out.split(importRegex).join("");
+  // const decoratorRegex =
+  //   /^\s*@[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*\([^()\n]*\))?\s*$/gm;
+  //
+  // out = out.split(decoratorRegex).join("");
+  // const arr = out.split("\n");
+  // const filtered = arr.filter((line) => !line.includes("export"));
 
-  out = out.split(decoratorRegex).join("");
-
-  const exportRegex = /^export\s+\*\s+from\s+(['"])([^'"]+)\1;?$/gm;
-  out = out.split(exportRegex).join("");
   return out;
 }
+
 // ---------- concat function ----------
-async function concat(entry: string, outPath: string): Promise<string[]> {
-  const command = new Deno.Command("deno", {
-    args: ["info", "--json", entry],
-    stdout: "piped",
-    stderr: "inherit",
-  });
-
-  const { stdout } = await command.output();
-  const raw = new TextDecoder().decode(stdout);
-
-  const graph = JSON.parse(raw) as DenoGraph;
-  const bySpec = new Map(graph.modules.map((m) => [m.specifier, m]));
-
-  const visited = new Set<string>();
-  const order: string[] = [];
-  const includedFiles: string[] = [];
-
-  function visit(spec?: string) {
-    if (!spec || visited.has(spec)) return;
-    visited.add(spec);
-    const m = bySpec.get(spec);
-    if (!m) return;
-    for (const d of m.dependencies ?? []) {
-      const child =
-        d.code?.specifier ??
-        d.type?.specifier ??
-        d.maybeCode?.specifier ??
-        d.specifier;
-      visit(child);
-    }
-    order.push(spec);
-  }
-
-  for (const r of graph.roots ?? []) visit(r);
-  if (order.length === 0 && graph.modules?.[0]) {
-    visit(graph.modules[0].specifier);
-  }
-
-  const includeRemote = Deno.env.get("INCLUDE_REMOTE") === "1";
-  const includeJs = Deno.env.get("INCLUDE_JS") === "1";
-
-  const mediaOk = new Set([
-    "TypeScript",
-    "TSX",
-    ...(includeJs ? ["JavaScript", "JSX"] : []),
-  ]);
-
-  let out = "";
-  for (const spec of order) {
-    const m = bySpec.get(spec);
-    if (!m) continue;
-
-    const isFile = (m.local ?? "").startsWith("/");
-    if (!isFile && !includeRemote) continue;
-
-    if (!m.mediaType || !mediaOk.has(m.mediaType)) continue;
-
-    try {
-      if (!m.local) continue;
-      const src = await Deno.readTextFile(m.local);
-
-      // Track included local files for watching
-      if (isFile) {
-        includedFiles.push(m.local);
-      }
-
-      out += `\n// =============================================\n`;
-      out += `// Source: ${spec}\n`;
-      out += `// Local:  ${m.local}\n`;
-      out += `// Media:  ${m.mediaType}\n`;
-      out += `// =============================================\n\n`;
-      out += src + "\n";
-    } catch {
-      // skip
-    }
-    out = stripImportsAndDecoratorCalls(out);
-  }
-
-  const removedImports = out
-    .split("\n")
-    .map((line) => (line.includes("import") ? "" : line))
-    .filter(Boolean)
-    .join("\n");
-
-  // Apply badge replacements from config - simple find and replace
-  let withBadges = removedImports;
-  let totalReplacements = 0;
-
-  for (const [pattern, replacement] of Object.entries(badgeConfig)) {
-    // Simple string replacement - replace all occurrences of the pattern
-    const regex = new RegExp(
-      pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-      "g",
-    );
-    const matches = withBadges.match(regex) || [];
-    withBadges = withBadges.replace(regex, replacement);
-    totalReplacements += matches.length;
-  }
-
-  await Deno.writeTextFile(outPath, withBadges);
-  const dnt = "jsr:@deno/dnt";
-  const { emit } = await import(dnt);
-
-  // Use deno_emit to bundle the concatenated file into a single file
-
-  const { files } = await emit({
-    entryPoints: [outPath],
-    shims: { deno: true },
-    typeCheck: "both",
-    compilerOptions: {
-      lib: ["ES2022", "DOM"],
-      module: "NodeNext",
-      moduleResolution: "NodeNext",
-      target: "ES2022",
-      skipLibCheck: true,
-    },
-    package: { name: "typedoc-shadow", version: "0.0.0" },
-  });
-  console.log(Object.keys(files.toObject()));
-
-  const [singleOutputFile] = Object.values(files.toObject());
-  await Deno.writeTextFile(outPath, singleOutputFile as unknown as string);
-
-  // Now `files` is a Map<path,text>
-  for (const [path, text] of files) {
-    console.log(path, text.slice(0, 200)); // just preview text
-  }
-  console.log(`✓ Generated concat.ts at: ${outPath}`);
-
-  // Show a preview if badges were replaced
-  if (totalReplacements > 0) {
-    console.log(`Replaced ${totalReplacements} badge patterns`);
-  }
-
-  return includedFiles;
-}
+// async function concat(entry: string, outPath: string): Promise<string[]> {
+// const command = new Deno.Command("deno", {
+//   args: ["info", "--json", entry],
+//   stdout: "piped",
+//   stderr: "inherit",
+// });
+//
+// const { stdout } = await command.output();
+// const raw = new TextDecoder().decode(stdout);
+//
+// const graph = JSON.parse(raw) as DenoGraph;
+// const bySpec = new Map(graph.modules.map((m) => [m.specifier, m]));
+//
+// const visited = new Set<string>();
+// const order: string[] = [];
+// const includedFiles: string[] = [];
+//
+// function visit(spec?: string) {
+//   if (!spec || visited.has(spec)) return;
+//   visited.add(spec);
+//   const m = bySpec.get(spec);
+//   if (!m) return;
+//   for (const d of m.dependencies ?? []) {
+//     const child =
+//       d.code?.specifier ??
+//       d.type?.specifier ??
+//       d.maybeCode?.specifier ??
+//       d.specifier;
+//     visit(child);
+//   }
+//   order.push(spec);
+// }
+//
+// for (const r of graph.roots ?? []) visit(r);
+// if (order.length === 0 && graph.modules?.[0]) {
+//   visit(graph.modules[0].specifier);
+// }
+//
+// const includeRemote = Deno.env.get("INCLUDE_REMOTE") === "1";
+// const includeJs = Deno.env.get("INCLUDE_JS") === "1";
+//
+// const mediaOk = new Set([
+//   "TypeScript",
+//   "TSX",
+//   ...(includeJs ? ["JavaScript", "JSX"] : []),
+// ]);
+//
+// let out = "";
+// for (const spec of order) {
+//   const m = bySpec.get(spec);
+//   if (!m) continue;
+//
+//   const isFile = (m.local ?? "").startsWith("/");
+//   if (!isFile && !includeRemote) continue;
+//
+//   if (!m.mediaType || !mediaOk.has(m.mediaType)) continue;
+//
+//   try {
+//     if (!m.local) continue;
+//     const src = await Deno.readTextFile(m.local);
+//
+//     // Track included local files for watching
+//     if (isFile) {
+//       includedFiles.push(m.local);
+//     }
+//
+//     out += `\n// =============================================\n`;
+//     out += `// Source: ${spec}\n`;
+//     out += `// Local:  ${m.local}\n`;
+//     out += `// Media:  ${m.mediaType}\n`;
+//     out += `// =============================================\n\n`;
+//     out += src + "\n";
+//   } catch {
+//     // skip
+//   }
+//   // out = stripImportsAndDecoratorCalls(out);
+// }
+//
+// // const removedImports = out
+// //   .split("\n")
+// //   .map((line) => (line.includes("import") ? "" : line))
+// //   .filter(Boolean)
+// //   .join("\n");
+//
+// // Apply badge replacements from config - simple find and replace
+// //
+//
+// await Deno.writeTextFile(outPath, withBadges);
+//
+// // Use deno_emit to bundle the concatenated file into a single file
+//
+// const singleOutputFile = await dntBuildFromString(withBadges, outPath);
+// await Deno.writeTextFile(outPath, singleOutputFile as unknown as string);
+//
+// console.log(`✓ Generated concat.ts at: ${outPath}`);
+//
+// // Show a preview if badges were replaced
+// if (totalReplacements > 0) {
+//   console.log(`Replaced ${totalReplacements} badge patterns`);
+// }
+//
+// return includedFiles;
+// }
 
 // Recursively find and inject custom CSS/JS into all HTML files
 async function processHtmlFiles(
@@ -353,9 +539,16 @@ if (import.meta.main) {
   // Function to build documentation
   const buildDocs = async () => {
     const outts = join(tmpdir, "concat.ts");
-    let includedFiles = await concat(entry, outts);
+    const configPath = await findNearestDenoConfig(entry);
+    if (!configPath)
+      throw new Error(
+        "No deno.json or deno.jsonc found in the project hierarchy",
+      );
+    dntBuildFromString(entry, outts, configPath);
 
-    watchedFiles = includedFiles;
+    // let includedFiles = await concat(entry, outts);
+
+    watchedFiles = await getLocalTsDeps(entry);
     return outts;
   };
 
