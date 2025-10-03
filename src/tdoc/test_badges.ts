@@ -8,6 +8,7 @@
 
 export function testFunction(): void {
   console.log("This is a test function");
+  console.log("Modified to test watch functionality");
 }
 
 /**

@@ -1,7 +1,7 @@
 {
   "@lib/recordings": {
-    "content": "Audio-Recordings",
-    "color": "FF0000",
+    "content": "Audio-Recordings-v2",
+    "color": "FF5500",
     "type": "pill"
   },
   "@lib/transcription": {

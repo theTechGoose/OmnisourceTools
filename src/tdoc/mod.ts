@@ -757,7 +757,6 @@ type BadgeConfigMap = Record<string, BadgeConfig>;
 // Cache for badge config to avoid repeated file reads
 let cachedBadgeConfig: BadgeConfigMap | null = null;
 let badgeConfigPath: string | null = null;
-let badgeConfigWatcher: Deno.FsWatcher | null = null;
 
 // Load badge configuration from lib-tags.json or use defaults
 async function loadBadgeConfig(workingDir: string): Promise<BadgeConfigMap> {
@@ -806,41 +805,7 @@ async function loadBadgeConfig(workingDir: string): Promise<BadgeConfigMap> {
   return cachedBadgeConfig;
 }
 
-// Watch badge config file for changes
-async function watchBadgeConfig(onUpdate: () => void) {
-  if (!badgeConfigPath) return;
-
-  // Close existing watcher if any
-  if (badgeConfigWatcher) {
-    try {
-      badgeConfigWatcher.close();
-    } catch {
-      // Ignore errors when closing
-    }
-  }
-
-  try {
-    badgeConfigWatcher = Deno.watchFs(badgeConfigPath);
-    console.log(`👁 Watching badge config: ${badgeConfigPath}`);
-
-    for await (const event of badgeConfigWatcher) {
-      if (event.kind === "modify" || event.kind === "create") {
-        // Clear cache to force reload
-        cachedBadgeConfig = null;
-        console.log(`🔄 Badge config changed, reloading...`);
-
-        // Reload the config
-        const workingDir = dirname(badgeConfigPath);
-        await loadBadgeConfig(workingDir);
-
-        // Trigger update callback
-        onUpdate();
-      }
-    }
-  } catch (error) {
-    console.warn(`⚠ Could not watch badge config: ${error.message}`);
-  }
-}
+// Badge config watching is now integrated into the main file watcher
 
 // Recursively find and inject custom CSS/JS into all HTML files
 async function processHtmlFiles(
@@ -1005,8 +970,9 @@ if (import.meta.main) {
     // Write final output
     await Deno.writeTextFile(outts, finalContent);
 
-    // Update watched files (include entry file)
-    watchedFiles = [...files, entry];
+    // Update watched files - include the resolved entry file path
+    const resolvedEntryPath = resolve(entry);
+    watchedFiles = [...new Set([resolvedEntryPath, ...files])];
 
     return outts;
   };
@@ -1535,50 +1501,7 @@ footer .container::after {
     let debounceTimer: number | undefined;
     let watcherController: AbortController | null = null;
 
-    // Set up badge config watcher
-    await watchBadgeConfig(async () => {
-      console.log("Badge configuration changed, reloading...");
-      // Clear the cache
-      cachedBadgeConfig = null;
-      // Reload the badge config
-      const newBadgeConfig = await loadBadgeConfig(workingDir);
-      // Update the badgeConfig variable
-      Object.assign(badgeConfig, newBadgeConfig);
-      // Trigger rebuild
-      const rebuild = async () => {
-        console.log("\nBadge config changed, rebuilding...");
-        try {
-          // Re-concat the files (this will also update the watched files list)
-          const oldFileCount = watchedFiles.length;
-          const newOutts = await buildDocs(badgeConfig);
-
-          // Rebuild documentation
-          const success = await rebuildAndProcess();
-
-          if (success) {
-            // Send reload signal to browser
-            if (wsServer) {
-              wsServer.broadcast({ type: "reload" });
-            }
-
-            const newFileCount = watchedFiles.length;
-            if (newFileCount !== oldFileCount) {
-              console.log(
-                `Bundle size changed: ${oldFileCount} → ${newFileCount} files`,
-              );
-              // Restart watcher with new file list
-              await startWatcher();
-            }
-          }
-        } catch (error) {
-          console.error("Rebuild failed:", error);
-        }
-      };
-
-      // Debounce the rebuild
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(rebuild, 300);
-    });
+    // Badge config watching is now handled in the main file watcher
 
     const startWatcher = async () => {
       // Cancel previous watcher if exists
@@ -1589,20 +1512,35 @@ footer .container::after {
       watcherController = new AbortController();
       const { signal } = watcherController;
 
-      console.log(`Watching ${watchedFiles.length} files from the bundle...`);
+      // Include lib-tags.json in the watch list if it exists
+      const allWatchedFiles = [...watchedFiles];
+      if (badgeConfigPath && await exists(badgeConfigPath)) {
+        allWatchedFiles.push(badgeConfigPath);
+      }
 
-      // Watch only the files that are included in the bundle
+      console.log(`Watching ${allWatchedFiles.length} files (${watchedFiles.length} from bundle${badgeConfigPath ? ' + lib-tags.json' : ''})...`);
+
+      // Watch all files including lib-tags.json
       //@ts-ignore: dooks
-      const watcher = Deno.watchFs(watchedFiles, { signal });
+      const watcher = Deno.watchFs(allWatchedFiles, { signal });
 
       try {
         for await (const event of watcher) {
           // Check if any of the changed files are in our watched list
           const relevantChange = event.paths.some((path) =>
-            watchedFiles.includes(path),
+            allWatchedFiles.includes(path),
           );
 
           if (!relevantChange) continue;
+
+          // Check if lib-tags.json was changed
+          const badgeConfigChanged =
+            badgeConfigPath && event.paths.includes(badgeConfigPath);
+          if (badgeConfigChanged) {
+            // Clear badge config cache to force reload
+            cachedBadgeConfig = null;
+            console.log("Badge configuration changed");
+          }
 
           // Debounce rapid changes
           if (debounceTimer) {
@@ -1626,6 +1564,12 @@ footer .container::after {
     const rebuild = async () => {
       console.log("\nFiles changed, rebuilding...");
       try {
+        // Reload badge config if it was changed
+        if (cachedBadgeConfig === null) {
+          const newBadgeConfig = await loadBadgeConfig(workingDir);
+          Object.assign(badgeConfig, newBadgeConfig);
+        }
+
         // Re-concat the files (this will also update the watched files list)
         const oldFileCount = watchedFiles.length;
         const newOutts = await buildDocs(badgeConfig);

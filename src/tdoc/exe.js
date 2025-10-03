@@ -1034,7 +1034,6 @@ async function findGitRoot(startPath) {
 }
 var cachedBadgeConfig = null;
 var badgeConfigPath = null;
-var badgeConfigWatcher = null;
 async function loadBadgeConfig(workingDir) {
   if (cachedBadgeConfig !== null) {
     return cachedBadgeConfig;
@@ -1069,30 +1068,6 @@ async function loadBadgeConfig(workingDir) {
   }
   cachedBadgeConfig = defaultBadgeConfig;
   return cachedBadgeConfig;
-}
-async function watchBadgeConfig(onUpdate) {
-  if (!badgeConfigPath) return;
-  if (badgeConfigWatcher) {
-    try {
-      badgeConfigWatcher.close();
-    } catch {
-    }
-  }
-  try {
-    badgeConfigWatcher = Deno.watchFs(badgeConfigPath);
-    console.log(`\u{1F441} Watching badge config: ${badgeConfigPath}`);
-    for await (const event of badgeConfigWatcher) {
-      if (event.kind === "modify" || event.kind === "create") {
-        cachedBadgeConfig = null;
-        console.log(`\u{1F504} Badge config changed, reloading...`);
-        const workingDir = dirname3(badgeConfigPath);
-        await loadBadgeConfig(workingDir);
-        onUpdate();
-      }
-    }
-  } catch (error) {
-    console.warn(`\u26A0 Could not watch badge config: ${error.message}`);
-  }
 }
 async function processHtmlFiles(dir, customCssContent, customJsContent) {
   for await (const entry of Deno.readDir(dir)) {
@@ -1229,9 +1204,12 @@ if (import.meta.main) {
     let finalContent = content + denoGlobals + stubs;
     finalContent = addBadges(finalContent, badgeConfig2);
     await Deno.writeTextFile(outts2, finalContent);
+    const resolvedEntryPath = resolve3(entry);
     watchedFiles = [
-      ...files,
-      entry
+      .../* @__PURE__ */ new Set([
+        resolvedEntryPath,
+        ...files
+      ])
     ];
     return outts2;
   };
@@ -1592,50 +1570,31 @@ ${mermaidEnd}`;
   if (watchMode) {
     let debounceTimer;
     let watcherController = null;
-    await watchBadgeConfig(async () => {
-      console.log("Badge configuration changed, reloading...");
-      cachedBadgeConfig = null;
-      const newBadgeConfig = await loadBadgeConfig(workingDir);
-      Object.assign(badgeConfig, newBadgeConfig);
-      const rebuild2 = async () => {
-        console.log("\nBadge config changed, rebuilding...");
-        try {
-          const oldFileCount = watchedFiles.length;
-          const newOutts = await buildDocs(badgeConfig);
-          const success = await rebuildAndProcess();
-          if (success) {
-            if (wsServer) {
-              wsServer.broadcast({
-                type: "reload"
-              });
-            }
-            const newFileCount = watchedFiles.length;
-            if (newFileCount !== oldFileCount) {
-              console.log(`Bundle size changed: ${oldFileCount} \u2192 ${newFileCount} files`);
-              await startWatcher();
-            }
-          }
-        } catch (error) {
-          console.error("Rebuild failed:", error);
-        }
-      };
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(rebuild2, 300);
-    });
     const startWatcher = async () => {
       if (watcherController) {
         watcherController.abort();
       }
       watcherController = new AbortController();
       const { signal } = watcherController;
-      console.log(`Watching ${watchedFiles.length} files from the bundle...`);
-      const watcher = Deno.watchFs(watchedFiles, {
+      const allWatchedFiles = [
+        ...watchedFiles
+      ];
+      if (badgeConfigPath && await exists(badgeConfigPath)) {
+        allWatchedFiles.push(badgeConfigPath);
+      }
+      console.log(`Watching ${allWatchedFiles.length} files (${watchedFiles.length} from bundle${badgeConfigPath ? " + lib-tags.json" : ""})...`);
+      const watcher = Deno.watchFs(allWatchedFiles, {
         signal
       });
       try {
         for await (const event of watcher) {
-          const relevantChange = event.paths.some((path) => watchedFiles.includes(path));
+          const relevantChange = event.paths.some((path) => allWatchedFiles.includes(path));
           if (!relevantChange) continue;
+          const badgeConfigChanged = badgeConfigPath && event.paths.includes(badgeConfigPath);
+          if (badgeConfigChanged) {
+            cachedBadgeConfig = null;
+            console.log("Badge configuration changed");
+          }
           if (debounceTimer) {
             clearTimeout(debounceTimer);
           }
@@ -1654,6 +1613,10 @@ ${mermaidEnd}`;
     const rebuild = async () => {
       console.log("\nFiles changed, rebuilding...");
       try {
+        if (cachedBadgeConfig === null) {
+          const newBadgeConfig = await loadBadgeConfig(workingDir);
+          Object.assign(badgeConfig, newBadgeConfig);
+        }
         const oldFileCount = watchedFiles.length;
         const newOutts = await buildDocs(badgeConfig);
         const success = await rebuildAndProcess();
