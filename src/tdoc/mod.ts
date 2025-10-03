@@ -185,7 +185,7 @@ function addBadges(text: string, badgeConfig: BadgeConfigMap): string {
 
   for (const [tag, config] of Object.entries(badgeConfig)) {
     // Extract tag name from the tag (e.g., "@lib/recordings" -> "recordings")
-    const tagName = tag.split('/').pop() || tag;
+    const tagName = tag.split("/").pop() || tag;
 
     let replacement: string;
     if (config.type === "full") {
@@ -194,16 +194,19 @@ function addBadges(text: string, badgeConfig: BadgeConfigMap): string {
     } else {
       // For "pill" type (default), generate a shield.io badge
       const color = config.color || "007ec6"; // Default blue if no color specified
-      const content = config.content.replace(/-/g, '--').replace(/_/g, '__').replace(/ /g, '_');
-      const label = tagName.replace(/-/g, '--').replace(/_/g, '__').replace(/ /g, '_');
+      const content = config.content
+        .replace(/-/g, "--")
+        .replace(/_/g, "__")
+        .replace(/ /g, "_");
+      const label = tagName
+        .replace(/-/g, "--")
+        .replace(/_/g, "__")
+        .replace(/ /g, "_");
       replacement = `![pill](https://img.shields.io/badge/${content}-${label}-${color})<br>`;
     }
 
     // Simple string replacement - replace all occurrences of the tag
-    const regex = new RegExp(
-      tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-      "g",
-    );
+    const regex = new RegExp(tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
     const matches = withBadges.match(regex) || [];
     withBadges = withBadges.replace(regex, replacement);
     totalReplacements += matches.length;
@@ -768,12 +771,12 @@ async function loadBadgeConfig(workingDir: string): Promise<BadgeConfigMap> {
     "@lib/recordings": {
       content: "Lib-Recordings",
       color: "FF746C",
-      type: "pill"
+      type: "pill",
     },
     "@lib/transcription": {
       content: "Lib-Transcription",
       color: "26c6da",
-      type: "pill"
+      type: "pill",
     },
   };
 
@@ -789,7 +792,9 @@ async function loadBadgeConfig(workingDir: string): Promise<BadgeConfigMap> {
       return cachedBadgeConfig;
     } catch (error) {
       if (error instanceof Deno.errors.NotFound) {
-        console.log(`ℹ Using default badge config (no lib-tags.json found at git root)`);
+        console.log(
+          `ℹ Using default badge config (no lib-tags.json found at git root)`,
+        );
       } else {
         console.warn(`⚠ Error loading lib-tags.json: ${error.message}`);
       }
@@ -1202,7 +1207,10 @@ footer .container::after {
   };
 
   // Function to extract entrypoints WITHOUT removing them from the file
-  const extractEntrypoints = async (concatPath: string, badgeConfig: BadgeConfigMap) => {
+  const extractEntrypoints = async (
+    concatPath: string,
+    badgeConfig: BadgeConfigMap,
+  ) => {
     const content = await Deno.readTextFile(concatPath);
     const lines = content.split("\n");
 
