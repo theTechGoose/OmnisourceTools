@@ -2583,15 +2583,12 @@ async function getConfigPath() {
   const home = Deno.env.get("HOME") || "";
   return `${home}/.config/sshr/config.json`;
 }
-async function loadConfig() {
+async function loadFullConfig() {
   const configPath = await getConfigPath();
   try {
     const configContent = await Deno.readTextFile(configPath);
     const config = JSON.parse(configContent);
-    return config.servers.map((s) => ({
-      ...s,
-      online: false
-    }));
+    return config;
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
       console.log(`\u{1F4DD} Creating default config at ${configPath}`);
@@ -2600,13 +2597,21 @@ async function loadConfig() {
         recursive: true
       });
       await Deno.writeTextFile(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
-      return DEFAULT_CONFIG.servers.map((s) => ({
-        ...s,
-        online: false
-      }));
+      return DEFAULT_CONFIG;
     }
     throw error;
   }
+}
+async function loadConfig() {
+  const config = await loadFullConfig();
+  return config.servers.map((s) => ({
+    ...s,
+    online: false
+  }));
+}
+async function saveConfig(config) {
+  const configPath = await getConfigPath();
+  await Deno.writeTextFile(configPath, JSON.stringify(config, null, 2));
 }
 async function checkServerStatus(target) {
   try {
@@ -2677,37 +2682,86 @@ async function main2() {
   });
   let finalCommand = target.command;
   if (accessType === "bind") {
-    const bindings = [];
-    let addMore = true;
-    while (addMore) {
-      const remotePortStr = await Input.prompt({
-        message: "What port on the remote machine?",
+    const fullConfig = await loadFullConfig();
+    const savedBindings = fullConfig.portBindings || [];
+    const bindingOptions = [
+      {
+        name: "Create new port binding configuration",
+        value: "new"
+      },
+      ...savedBindings.map((pb) => ({
+        name: pb.name,
+        value: pb.name
+      }))
+    ];
+    let bindings = [];
+    const selectedBinding = await Select.prompt({
+      message: "Select a port binding configuration:",
+      options: bindingOptions
+    });
+    if (selectedBinding === "new") {
+      let addMore = true;
+      while (addMore) {
+        const remotePortStr = await Input.prompt({
+          message: "What port on the remote machine?",
+          validate: (value) => {
+            const port = parseInt(value);
+            if (isNaN(port) || port < 1 || port > 65535) {
+              return "Please enter a valid port number (1-65535)";
+            }
+            return true;
+          }
+        });
+        const localPortStr = await Input.prompt({
+          message: "What port on this machine?",
+          validate: (value) => {
+            const port = parseInt(value);
+            if (isNaN(port) || port < 1 || port > 65535) {
+              return "Please enter a valid port number (1-65535)";
+            }
+            return true;
+          }
+        });
+        bindings.push({
+          remotePort: parseInt(remotePortStr),
+          localPort: parseInt(localPortStr)
+        });
+        addMore = await Confirm.prompt({
+          message: "Do you want to add another binding?",
+          default: false
+        });
+      }
+      const configName = await Input.prompt({
+        message: "What would you like to name this port binding configuration?",
         validate: (value) => {
-          const port = parseInt(value);
-          if (isNaN(port) || port < 1 || port > 65535) {
-            return "Please enter a valid port number (1-65535)";
+          if (!value || value.trim() === "") {
+            return "Please enter a name";
+          }
+          if (savedBindings.some((pb) => pb.name === value)) {
+            return "A configuration with this name already exists";
           }
           return true;
         }
       });
-      const localPortStr = await Input.prompt({
-        message: "What port on this machine?",
-        validate: (value) => {
-          const port = parseInt(value);
-          if (isNaN(port) || port < 1 || port > 65535) {
-            return "Please enter a valid port number (1-65535)";
-          }
-          return true;
-        }
-      });
-      bindings.push({
-        remotePort: parseInt(remotePortStr),
-        localPort: parseInt(localPortStr)
-      });
-      addMore = await Confirm.prompt({
-        message: "Do you want to add another binding?",
-        default: false
-      });
+      const newPortBinding = {
+        name: configName,
+        bindings
+      };
+      fullConfig.portBindings = [
+        ...savedBindings,
+        newPortBinding
+      ];
+      await saveConfig(fullConfig);
+      console.log(`
+\u2705 Port binding configuration "${configName}" saved!
+`);
+    } else {
+      const savedConfig = savedBindings.find((pb) => pb.name === selectedBinding);
+      if (!savedConfig) {
+        console.error("\u274C Invalid port binding configuration");
+        Deno.exit(1);
+      }
+      bindings = savedConfig.bindings;
     }
     const portForwards = bindings.map((b) => `-L ${b.localPort}:localhost:${b.remotePort}`).join(" ");
     finalCommand = `${target.command} ${portForwards}`;

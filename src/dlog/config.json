@@ -1,0 +1,49 @@
+{
+  "name": "main",
+  "columns": [
+    {
+      "id": "274255",
+      "name": "time",
+      "handlerTsCode": "(line: Message): CellHandler => {\n    return { text: line.json_content['time'] }\n}",
+      "idx": 1,
+      "width": 95
+    },
+    {
+      "id": "722778",
+      "name": "id",
+      "handlerTsCode": "(line: Message): CellHandler => {\n    return { text: line.json_content['id'] }\n}",
+      "idx": 4,
+      "width": 41
+    },
+    {
+      "id": "539791",
+      "name": "lvl",
+      "handlerTsCode": "(line: Message): CellHandler => {\n    return { text: line.json_content['lvl'] }\n}",
+      "idx": 2,
+      "width": 40
+    },
+    {
+      "id": "500030",
+      "name": "svc",
+      "handlerTsCode": "(line: Message): CellHandler => {\n    return { text: line.json_content['svc'] }\n}",
+      "idx": 5,
+      "width": 117
+    },
+    {
+      "id": "124886",
+      "name": "msg",
+      "handlerTsCode": "(line: Message): CellHandler => {\n    return { text: line.json_content['msg'] }\n}",
+      "idx": 3,
+      "width": 600
+    }
+  ],
+  "settings": {
+    "leftColWidth": 300,
+    "drawerColWidth": 480,
+    "maxMessages": 1000,
+    "middlewares": [],
+    "entriesOrder": "desc",
+    "correlationIdField": "id",
+    "paintCorrelationIdCell": true
+  }
+}

@@ -150,12 +150,21 @@ async function main() {
       "Usage: deno run --allow-all mod.ts <path-to-copy> [...ports]",
     );
     console.error("       deno run --allow-all mod.ts --build-cache  (build cached image)");
+    console.error("       deno run --allow-all mod.ts --down         (stop and remove container)");
     Deno.exit(1);
   }
 
   // Handle cache building
   if (args[0] === "--build-cache") {
     await buildCachedImage();
+    return;
+  }
+
+  // Handle container teardown
+  if (args[0] === "--down") {
+    console.log("Stopping and removing container...");
+    await cleanupExistingContainer();
+    console.log("✅ Container removed");
     return;
   }
 

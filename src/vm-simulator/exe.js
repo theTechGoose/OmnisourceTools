@@ -152,10 +152,17 @@ async function main() {
   if (args.length < 1) {
     console.error("Usage: deno run --allow-all mod.ts <path-to-copy> [...ports]");
     console.error("       deno run --allow-all mod.ts --build-cache  (build cached image)");
+    console.error("       deno run --allow-all mod.ts --down         (stop and remove container)");
     Deno.exit(1);
   }
   if (args[0] === "--build-cache") {
     await buildCachedImage();
+    return;
+  }
+  if (args[0] === "--down") {
+    console.log("Stopping and removing container...");
+    await cleanupExistingContainer();
+    console.log("\u2705 Container removed");
     return;
   }
   const [localPath, ...ports] = args;
