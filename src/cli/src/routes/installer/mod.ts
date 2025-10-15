@@ -1,1 +1,0 @@
-export { InstallSelfRoute } from "./install-self-route.ts";
