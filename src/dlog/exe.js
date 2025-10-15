@@ -153,28 +153,28 @@ var config_default = {
     {
       id: "274255",
       name: "time",
-      handlerTsCode: "(line: Message): CellHandler => {\n    const key = 'time'\n    const text = line.is_json ? line.json_content[key] : null\n    return { text }\n}",
+      handlerTsCode: "(line: Message): CellHandler => {\n    const key = 'time'\n    const text = line.is_json ? line.json_content[key] : '---'\n    return { text }\n}",
       idx: 1,
       width: 95
     },
     {
       id: "722778",
       name: "id",
-      handlerTsCode: "(line: Message): CellHandler => {\n    const key = 'id'\n    const text = line.is_json ? line.json_content[key] : null\n    return { text }\n}",
+      handlerTsCode: "(line: Message): CellHandler => {\n    const key = 'id'\n    const text = line.is_json ? line.json_content[key] : '---'\n    return { text }\n}",
       idx: 4,
       width: 41
     },
     {
       id: "539791",
       name: "lvl",
-      handlerTsCode: "(line: Message): CellHandler => {\n    const key = 'lvl'\n    const text = line.is_json ? line.json_content[key] : null\n    return { text }\n}",
+      handlerTsCode: "(line: Message): CellHandler => {\n    const key = 'lvl'\n    const text = line.is_json ? line.json_content[key] : '---'\n    return { text }\n}",
       idx: 2,
       width: 40
     },
     {
       id: "500030",
       name: "svc",
-      handlerTsCode: "(line: Message): CellHandler => {\n    const key = 'svc'\n    const text = line.is_json ? line.json_content[key] : null\n    return { text }\n}",
+      handlerTsCode: "(line: Message): CellHandler => {\n    const key = 'svc'\n    const text = line.is_json ? line.json_content[key] : '---'\n    return { text }\n}",
       idx: 5,
       width: 117
     },
@@ -420,48 +420,6 @@ function dirname3(path) {
   return isWindows ? dirname2(path) : dirname(path);
 }
 
-// deno:https://jsr.io/@std/fs/1.0.19/exists.ts
-async function exists(path, options) {
-  try {
-    const stat = await Deno.stat(path);
-    if (options && (options.isReadable || options.isDirectory || options.isFile)) {
-      if (options.isDirectory && options.isFile) {
-        throw new TypeError("ExistsOptions.options.isDirectory and ExistsOptions.options.isFile must not be true together");
-      }
-      if (options.isDirectory && !stat.isDirectory || options.isFile && !stat.isFile) {
-        return false;
-      }
-      if (options.isReadable) {
-        return fileIsReadable(stat);
-      }
-    }
-    return true;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      return false;
-    }
-    if (error instanceof Deno.errors.PermissionDenied) {
-      if ((await Deno.permissions.query({
-        name: "read",
-        path
-      })).state === "granted") {
-        return !options?.isReadable;
-      }
-    }
-    throw error;
-  }
-}
-function fileIsReadable(stat) {
-  if (stat.mode === null) {
-    return true;
-  } else if (Deno.uid() === stat.uid) {
-    return (stat.mode & 256) === 256;
-  } else if (Deno.gid() === stat.gid) {
-    return (stat.mode & 32) === 32;
-  }
-  return (stat.mode & 4) === 4;
-}
-
 // deno:https://jsr.io/@std/fs/1.0.19/move.ts
 var EXISTS_ERROR = new Deno.errors.AlreadyExists("dest already exists.");
 
@@ -497,12 +455,13 @@ function ensureSudo() {
   throw new Error("The first run must be run as root (sudo) to install Logdy.");
 }
 async function ensureConfigAsync(configPath, cfg) {
-  if (await exists(configPath)) return;
   const dir = dirname3(configPath);
   await ensureDir(dir);
-  if (!await exists(configPath)) {
-    await Deno.writeTextFile(configPath, JSON.stringify(cfg, null, 2));
-    console.log(`Created default Logdy config at ${configPath}`);
+  const existing = await Deno.readTextFile(configPath).catch(() => null);
+  const desired = JSON.stringify(cfg, null, 2);
+  if (existing !== desired) {
+    await Deno.writeTextFile(configPath, desired);
+    console.log(existing === null ? `Created default Logdy config at ${configPath}` : `Updated Logdy config at ${configPath}`);
   }
 }
 async function ensureLogdyInstalled() {
