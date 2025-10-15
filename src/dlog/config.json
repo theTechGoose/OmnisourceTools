@@ -4,35 +4,35 @@
     {
       "id": "274255",
       "name": "time",
-      "handlerTsCode": "(line: Message): CellHandler => {\n    return { text: line.json_content['time'] }\n}",
+      "handlerTsCode": "(line: Message): CellHandler => {\n    const key = 'time'\n    const text = line.is_json ? line.json_content[key] : null\n    return { text }\n}",
       "idx": 1,
       "width": 95
     },
     {
       "id": "722778",
       "name": "id",
-      "handlerTsCode": "(line: Message): CellHandler => {\n    return { text: line.json_content['id'] }\n}",
+      "handlerTsCode": "(line: Message): CellHandler => {\n    const key = 'id'\n    const text = line.is_json ? line.json_content[key] : null\n    return { text }\n}",
       "idx": 4,
       "width": 41
     },
     {
       "id": "539791",
       "name": "lvl",
-      "handlerTsCode": "(line: Message): CellHandler => {\n    return { text: line.json_content['lvl'] }\n}",
+      "handlerTsCode": "(line: Message): CellHandler => {\n    const key = 'lvl'\n    const text = line.is_json ? line.json_content[key] : null\n    return { text }\n}",
       "idx": 2,
       "width": 40
     },
     {
       "id": "500030",
       "name": "svc",
-      "handlerTsCode": "(line: Message): CellHandler => {\n    return { text: line.json_content['svc'] }\n}",
+      "handlerTsCode": "(line: Message): CellHandler => {\n    const key = 'svc'\n    const text = line.is_json ? line.json_content[key] : null\n    return { text }\n}",
       "idx": 5,
       "width": 117
     },
     {
       "id": "124886",
       "name": "msg",
-      "handlerTsCode": "(line: Message): CellHandler => {\n    return { text: line.json_content['msg'] }\n}",
+      "handlerTsCode": "(line: Message): CellHandler => {\n    const key = 'msg'\n    const text = line.is_json ? line.json_content[key] : line.content\n    return { text }\n}",
       "idx": 3,
       "width": 600
     }

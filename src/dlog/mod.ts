@@ -8,6 +8,7 @@ async function main() {
   const configPath = await prep();
   const denoCmd = [`deno`, ...Deno.args];
   const logdyCmd = ["logdy", "--config", configPath, "--port=9501"];
+  console.log(cfg);
   await runCmd("string", ...denoCmd, "|", ...logdyCmd);
 }
 
@@ -24,14 +25,19 @@ function ensureSudo() {
 }
 
 export async function ensureConfigAsync(configPath: string, cfg: unknown) {
-  if (await exists(configPath)) return;
-
   const dir = dirname(configPath);
   await ensureDir(dir);
 
-  if (!(await exists(configPath))) {
-    await Deno.writeTextFile(configPath, JSON.stringify(cfg, null, 2));
-    console.log(`Created default Logdy config at ${configPath}`);
+  // Read existing config if present
+  const existing = await Deno.readTextFile(configPath).catch(() => null);
+  const desired = JSON.stringify(cfg, null, 2);
+
+  // Only write if different or missing
+  if (existing !== desired) {
+    await Deno.writeTextFile(configPath, desired);
+    console.log(existing === null
+      ? `Created default Logdy config at ${configPath}`
+      : `Updated Logdy config at ${configPath}`);
   }
 }
 
