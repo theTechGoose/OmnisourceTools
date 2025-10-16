@@ -16,6 +16,8 @@ import {
   resolve,
   dirname,
 } from "https://deno.land/std@0.224.0/path/mod.ts";
+// @deno-types="npm:@types/typescript@5.7.0"
+import ts from "https://esm.sh/typescript@5.7.3";
 
 export async function findNearestDenoConfig(
   startPath: string,
@@ -24,22 +26,65 @@ export async function findNearestDenoConfig(
     ? resolve(startPath)
     : dirname(resolve(startPath));
 
+  // Find the nearest deno config
+  let checkDir = dir;
   while (true) {
-    const jsonPath = join(dir, "deno.json");
-    const jsoncPath = join(dir, "deno.jsonc");
+    const jsonPath = join(checkDir, "deno.json");
+    const jsoncPath = join(checkDir, "deno.jsonc");
 
     if (await exists(jsonPath)) return jsonPath;
     if (await exists(jsoncPath)) return jsoncPath;
 
-    const parent = dirname(dir);
-    if (parent === dir) break; // reached root
-    dir = parent;
+    const parent = dirname(checkDir);
+    if (parent === checkDir) break; // reached root
+    checkDir = parent;
   }
+
   return null;
 }
 
 /**
- * Load import map from deno.json/deno.jsonc
+ * Find workspace root config by looking up the directory tree
+ */
+async function findWorkspaceRoot(startPath: string): Promise<string | null> {
+  let checkDir = (await Deno.stat(startPath)).isDirectory
+    ? resolve(startPath)
+    : dirname(resolve(startPath));
+
+  while (true) {
+    const jsonPath = join(checkDir, "deno.json");
+    const jsoncPath = join(checkDir, "deno.jsonc");
+
+    // Check if this directory has a deno config with workspace field
+    for (const configPath of [jsonPath, jsoncPath]) {
+      if (await exists(configPath)) {
+        try {
+          let content = await Deno.readTextFile(configPath);
+          // Remove comments for jsonc
+          if (configPath.endsWith(".jsonc")) {
+            content = content.replace(/\/\/.*$/gm, "");
+            content = content.replace(/\/\*[\s\S]*?\*\//g, "");
+          }
+          const config = JSON.parse(content);
+          if (config.workspace && Array.isArray(config.workspace)) {
+            return configPath;
+          }
+        } catch {
+          // Failed to read or parse, continue
+        }
+      }
+    }
+
+    const parent = dirname(checkDir);
+    if (parent === checkDir) break; // reached root
+    checkDir = parent;
+  }
+
+  return null;
+}
+
+/**
+ * Load import map from deno.json/deno.jsonc, including workspace member exports
  */
 export async function loadImportMap(
   configPath: string,
@@ -56,7 +101,65 @@ export async function loadImportMap(
     }
 
     const config = JSON.parse(content);
-    return config.imports || null;
+    const importMap: Record<string, string> = {};
+
+    // First, check if there's a workspace root and load workspace member exports
+    const workspaceRoot = await findWorkspaceRoot(configPath);
+    if (workspaceRoot && workspaceRoot !== configPath) {
+      // Load workspace member exports first (lower priority)
+      let workspaceContent = await Deno.readTextFile(workspaceRoot);
+      if (workspaceRoot.endsWith(".jsonc")) {
+        workspaceContent = workspaceContent.replace(/\/\/.*$/gm, "");
+        workspaceContent = workspaceContent.replace(/\/\*[\s\S]*?\*\//g, "");
+      }
+      const workspaceConfig = JSON.parse(workspaceContent);
+
+      if (workspaceConfig.workspace && Array.isArray(workspaceConfig.workspace)) {
+        const workspaceDir = dirname(workspaceRoot);
+
+        // Load each workspace member and add its exports
+        for (const workspacePath of workspaceConfig.workspace) {
+          const memberPath = resolve(workspaceDir, workspacePath);
+          const memberConfigPath = join(memberPath, "deno.json");
+
+          try {
+            let memberContent = await Deno.readTextFile(memberConfigPath);
+            const memberConfig = JSON.parse(memberContent);
+
+            // If the workspace member has a name and exports, add them to import map
+            if (memberConfig.name && memberConfig.exports) {
+              const workspaceName = memberConfig.name;
+
+              // Add each export from the workspace member
+              for (const [exportKey, exportPath] of Object.entries(memberConfig.exports)) {
+                let fullExportPath: string;
+                if (exportKey === ".") {
+                  fullExportPath = workspaceName;
+                } else {
+                  // Remove leading "./" from export key and concatenate with workspace name
+                  const cleanedExportKey = exportKey.replace(/^\./, "");
+                  fullExportPath = `${workspaceName}${cleanedExportKey}`;
+                }
+
+                // Resolve the export path relative to the workspace member
+                const resolvedExportPath = resolve(memberPath, exportPath as string);
+                importMap[fullExportPath] = resolvedExportPath;
+              }
+            }
+          } catch (e) {
+            // Workspace member might not have deno.json, skip
+            // Don't warn - this is expected for some workspace members
+          }
+        }
+      }
+    }
+
+    // Then merge in the local imports (higher priority - will override workspace exports)
+    if (config.imports) {
+      Object.assign(importMap, config.imports);
+    }
+
+    return Object.keys(importMap).length > 0 ? importMap : null;
   } catch {
     return null;
   }
@@ -289,6 +392,708 @@ function extractImports(code: string): Map<string, Set<string>> {
 }
 
 /**
+ * Extract ALL import module specifiers (including local ones) from TypeScript code
+ */
+function extractAllImportPaths(code: string): string[] {
+  const importPaths: string[] = [];
+
+  // Match all import statements and extract the module specifier
+  const patterns = [
+    // Side effect imports: import "..."
+    /import\s+["']([^"']+)["']/g,
+    // Regular imports with from: import ... from "..."
+    /import\s+(?:type\s+)?(?:\{[^}]+\}|\*\s+as\s+\w+|\w+)\s+from\s+["']([^"']+)["']/g,
+  ];
+
+  for (const pattern of patterns) {
+    let match;
+    pattern.lastIndex = 0;
+    while ((match = pattern.exec(code)) !== null) {
+      const moduleSpec = match[1];
+      // Include ALL imports (local and external)
+      importPaths.push(moduleSpec);
+    }
+  }
+
+  return importPaths;
+}
+
+/**
+ * Extract imported symbols and their source modules from TypeScript code using AST
+ * Returns: Map of module specifier -> Set of symbol names
+ */
+function extractImportedSymbols(code: string): Map<string, Set<string>> {
+  const symbolMap = new Map<string, Set<string>>();
+
+  // Parse the source code into an AST
+  const sourceFile = ts.createSourceFile(
+    "temp.ts",
+    code,
+    ts.ScriptTarget.Latest,
+    true
+  );
+
+  // Walk the AST to find import declarations
+  function visit(node: ts.Node) {
+    if (ts.isImportDeclaration(node)) {
+      // Get the module specifier
+      const moduleSpec = (node.moduleSpecifier as ts.StringLiteral).text;
+
+      if (!symbolMap.has(moduleSpec)) {
+        symbolMap.set(moduleSpec, new Set());
+      }
+
+      const importClause = node.importClause;
+      if (!importClause) {
+        // Side-effect import: import "module"
+        return;
+      }
+
+      // Handle default import: import X from "module"
+      if (importClause.name) {
+        symbolMap.get(moduleSpec)!.add(importClause.name.text);
+      }
+
+      // Handle named bindings
+      if (importClause.namedBindings) {
+        if (ts.isNamespaceImport(importClause.namedBindings)) {
+          // Namespace import: import * as X from "module"
+          symbolMap.get(moduleSpec)!.add("*");
+        } else if (ts.isNamedImports(importClause.namedBindings)) {
+          // Named imports: import { A, B as C } from "module"
+          for (const element of importClause.namedBindings.elements) {
+            // Use propertyName if aliased (import { A as B }), otherwise use name
+            const symbolName = element.propertyName
+              ? element.propertyName.text
+              : element.name.text;
+            symbolMap.get(moduleSpec)!.add(symbolName);
+          }
+        }
+      }
+    }
+
+    // Continue walking
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+
+  return symbolMap;
+}
+
+/**
+ * Extract a specific symbol's definition from TypeScript source code using AST
+ * Returns the full text of the symbol's definition (class, interface, type, const, etc.)
+ */
+function extractSymbolDefinition(code: string, symbolName: string): string | null {
+  // Parse the source code into an AST
+  const sourceFile = ts.createSourceFile(
+    "temp.ts",
+    code,
+    ts.ScriptTarget.Latest,
+    true
+  );
+
+  let foundNode: ts.Node | null = null;
+
+  // Walk the AST to find the exported symbol
+  function visit(node: ts.Node) {
+    // Check if this is an export declaration (re-export)
+    if (ts.isExportDeclaration(node)) {
+      // Handle: export { X } from "..."
+      // Skip these - they're re-exports, not definitions
+      return;
+    }
+
+    // Check for exported declarations using newer TS 5.x API
+    let hasExportModifier = false;
+    if (ts.canHaveModifiers(node)) {
+      const modifiers = ts.getModifiers(node);
+      hasExportModifier = modifiers?.some(
+        (m) => m.kind === ts.SyntaxKind.ExportKeyword
+      ) ?? false;
+    }
+
+    if (hasExportModifier) {
+      // Check different declaration types
+      if (ts.isClassDeclaration(node) && node.name?.text === symbolName) {
+        foundNode = node;
+        return;
+      }
+      if (ts.isInterfaceDeclaration(node) && node.name.text === symbolName) {
+        foundNode = node;
+        return;
+      }
+      if (ts.isTypeAliasDeclaration(node) && node.name.text === symbolName) {
+        foundNode = node;
+        return;
+      }
+      if (ts.isEnumDeclaration(node) && node.name.text === symbolName) {
+        foundNode = node;
+        return;
+      }
+      if (ts.isVariableStatement(node)) {
+        // Check variable declarations (export const X = ...)
+        for (const decl of node.declarationList.declarations) {
+          if (ts.isIdentifier(decl.name) && decl.name.text === symbolName) {
+            foundNode = node;
+            return;
+          }
+        }
+      }
+      if (ts.isFunctionDeclaration(node) && node.name?.text === symbolName) {
+        foundNode = node;
+        return;
+      }
+    }
+
+    // Continue walking
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+
+  if (foundNode) {
+    // Extract the full text of the node including export keyword
+    // Use getText() which properly handles the node text
+    return foundNode.getText(sourceFile);
+  }
+
+  return null;
+}
+
+/**
+ * Resolve a symbol by following re-export chains to find its actual definition
+ * Returns: { filePath: string, definition: string } | null
+ */
+async function resolveSymbolDefinition(
+  symbolName: string,
+  moduleSpec: string,
+  importMap: Record<string, string> | null,
+  configDir: string,
+  rootAbs: string,
+  visited: Set<string> = new Set(),
+): Promise<{ filePath: string; definition: string; jsdoc?: string } | null> {
+  // Resolve module specifier to file path
+  let resolvedPath: string;
+
+  if (moduleSpec.startsWith(".") || moduleSpec.startsWith("/")) {
+    resolvedPath = resolve(configDir, moduleSpec);
+  } else if (importMap) {
+    resolvedPath = resolveImportMapAlias(moduleSpec, importMap, configDir);
+    if (!resolvedPath.startsWith("/")) {
+      // External module, can't resolve
+      return null;
+    }
+  } else {
+    // External module
+    return null;
+  }
+
+  // Add .ts extension if missing
+  if (!resolvedPath.endsWith(".ts") && !resolvedPath.endsWith(".tsx")) {
+    const candidates = [
+      resolvedPath + ".ts",
+      resolvedPath + "/mod.ts",
+      resolvedPath + ".tsx",
+    ];
+
+    for (const candidate of candidates) {
+      try {
+        const stat = await Deno.stat(candidate);
+        if (stat.isFile) {
+          resolvedPath = candidate;
+          break;
+        }
+      } catch {
+        // Try next
+      }
+    }
+  }
+
+  // Avoid circular dependencies
+  if (visited.has(resolvedPath)) {
+    return null;
+  }
+  visited.add(resolvedPath);
+
+  // Only process files within project
+  if (
+    !(resolvedPath.startsWith(rootAbs + "/") || resolvedPath === rootAbs) ||
+    resolvedPath.includes("/node_modules/")
+  ) {
+    return null;
+  }
+
+  try {
+    const fileContent = await Deno.readTextFile(resolvedPath);
+
+    // Try to find the symbol's definition directly in this file
+    const definition = extractSymbolDefinition(fileContent, symbolName);
+    if (definition) {
+      // Extract JSDoc if present (only the LAST JSDoc comment before the definition)
+      let jsdoc: string | undefined;
+      const defIndex = fileContent.indexOf(definition);
+      if (defIndex > 0) {
+        const beforeDef = fileContent.substring(0, defIndex);
+
+        // Find all JSDoc comments in beforeDef
+        const jsdocRegex = /\/\*\*[\s\S]*?\*\//g;
+        const allJsdocs = [...beforeDef.matchAll(jsdocRegex)];
+
+        // Take the LAST JSDoc comment (the one immediately before the definition)
+        if (allJsdocs.length > 0) {
+          const lastJsdoc = allJsdocs[allJsdocs.length - 1];
+          // Check if it's close to the definition (not separated by too much code)
+          const jsdocEnd = lastJsdoc.index! + lastJsdoc[0].length;
+          const gapContent = beforeDef.substring(jsdocEnd, beforeDef.length);
+          // Only use this JSDoc if the gap is just whitespace/comments (not code)
+          if (/^\s*(\/\/[^\n]*\n)*\s*$/.test(gapContent)) {
+            jsdoc = lastJsdoc[0];
+          }
+        }
+      }
+
+      // Return an object that includes the file path so we can extract other symbols later
+      return { filePath: resolvedPath, definition, jsdoc };
+    }
+
+    // Check for re-exports using AST
+    const sourceFile = ts.createSourceFile(
+      resolvedPath,
+      fileContent,
+      ts.ScriptTarget.Latest,
+      true
+    );
+
+    // Find re-export declarations
+    const reexportModules: string[] = [];
+
+    function findReexports(node: ts.Node) {
+      if (ts.isExportDeclaration(node)) {
+        const moduleSpec = node.moduleSpecifier;
+        if (moduleSpec && ts.isStringLiteral(moduleSpec)) {
+          const modulePath = moduleSpec.text;
+
+          // Check if this is export * from "..." or export { symbolName } from "..."
+          if (!node.exportClause) {
+            // export * from "..."
+            reexportModules.push(modulePath);
+          } else if (ts.isNamedExports(node.exportClause)) {
+            // export { A, B } from "..."
+            for (const element of node.exportClause.elements) {
+              const exportedName = element.name.text;
+              if (exportedName === symbolName) {
+                reexportModules.push(modulePath);
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      ts.forEachChild(node, findReexports);
+    }
+
+    findReexports(sourceFile);
+
+    // Try to resolve the symbol in each re-export module
+    for (const reexportModule of reexportModules) {
+      const resolved = await resolveSymbolDefinition(
+        symbolName,
+        reexportModule,
+        importMap,
+        dirname(resolvedPath),
+        rootAbs,
+        visited,
+      );
+      if (resolved) return resolved;
+    }
+  } catch (e) {
+    console.warn(`Error resolving symbol ${symbolName} in ${resolvedPath}: ${e.message}`);
+  }
+
+  return null;
+}
+
+/**
+ * Extract all exported symbol names from a TypeScript file using AST
+ * Returns: Set of exported symbol names (only symbols defined in the file, not re-exports)
+ */
+function extractExportedSymbolNames(code: string): Set<string> {
+  const exportedNames = new Set<string>();
+
+  const sourceFile = ts.createSourceFile(
+    "temp.ts",
+    code,
+    ts.ScriptTarget.Latest,
+    true
+  );
+
+  function visit(node: ts.Node) {
+    // Skip ALL export declarations (both with and without 'from' clause)
+    // export { X } from "..." OR export { X }
+    if (ts.isExportDeclaration(node)) {
+      return;
+    }
+
+    // Check for exported declarations using newer TS 5.x API
+    let hasExportModifier = false;
+    if (ts.canHaveModifiers(node)) {
+      const modifiers = ts.getModifiers(node);
+      hasExportModifier = modifiers?.some(
+        (m) => m.kind === ts.SyntaxKind.ExportKeyword
+      ) ?? false;
+    }
+
+    if (hasExportModifier) {
+      if (ts.isClassDeclaration(node) && node.name) {
+        exportedNames.add(node.name.text);
+      } else if (ts.isInterfaceDeclaration(node)) {
+        exportedNames.add(node.name.text);
+      } else if (ts.isTypeAliasDeclaration(node)) {
+        exportedNames.add(node.name.text);
+      } else if (ts.isEnumDeclaration(node)) {
+        exportedNames.add(node.name.text);
+      } else if (ts.isVariableStatement(node)) {
+        for (const decl of node.declarationList.declarations) {
+          if (ts.isIdentifier(decl.name)) {
+            exportedNames.add(decl.name.text);
+          }
+        }
+      } else if (ts.isFunctionDeclaration(node) && node.name) {
+        exportedNames.add(node.name.text);
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return exportedNames;
+}
+
+/**
+ * Build symbol-level dependency graph
+ * Returns: Map of symbol name -> { filePath, definition, jsdoc }
+ */
+async function buildSymbolDependencyGraph(
+  entryPath: string,
+  importMap: Record<string, string> | null,
+  configDir: string,
+  rootAbs: string,
+): Promise<Map<string, { filePath: string; definition: string; jsdoc?: string }>> {
+  const resolvedSymbols = new Map<string, { filePath: string; definition: string; jsdoc?: string }>();
+  const toProcess: Array<{ symbol: string; moduleSpec: string; contextDir: string }> = [];
+
+  // Read entry file and extract imported symbols
+  const entryContent = await Deno.readTextFile(entryPath);
+  const importedSymbols = extractImportedSymbols(entryContent);
+
+  console.log(`✓ Found ${importedSymbols.size} import statements in entry file`);
+
+  // Also extract all exported symbols from the entry file itself
+  const exportedSymbols = extractExportedSymbolNames(entryContent);
+  console.log(`✓ Found ${exportedSymbols.size} exported symbols in entry file`);
+
+  // Process exported symbols from entry file first (they're defined locally)
+  for (const symbolName of exportedSymbols) {
+    const definition = extractSymbolDefinition(entryContent, symbolName);
+    if (definition) {
+      // Extract JSDoc if present (only the LAST JSDoc comment before the definition)
+      let jsdoc: string | undefined;
+      const defIndex = entryContent.indexOf(definition);
+      if (defIndex > 0) {
+        const beforeDef = entryContent.substring(0, defIndex);
+
+        // Find all JSDoc comments in beforeDef
+        const jsdocRegex = /\/\*\*[\s\S]*?\*\//g;
+        const allJsdocs = [...beforeDef.matchAll(jsdocRegex)];
+
+        // Take the LAST JSDoc comment (the one immediately before the definition)
+        if (allJsdocs.length > 0) {
+          const lastJsdoc = allJsdocs[allJsdocs.length - 1];
+          // Check if it's close to the definition (not separated by too much code)
+          const jsdocEnd = lastJsdoc.index! + lastJsdoc[0].length;
+          const gapContent = beforeDef.substring(jsdocEnd, beforeDef.length);
+          // Only use this JSDoc if the gap is just whitespace/comments (not code)
+          if (/^\s*(\/\/[^\n]*\n)*\s*$/.test(gapContent)) {
+            jsdoc = lastJsdoc[0];
+          }
+        }
+      }
+
+      resolvedSymbols.set(symbolName, {
+        filePath: entryPath,
+        definition,
+        jsdoc,
+      });
+
+      // Extract type references from this symbol's definition
+      const symbolRefs = extractSymbolReferences(definition);
+      for (const ref of symbolRefs) {
+        if (!resolvedSymbols.has(ref) && !toProcess.some(p => p.symbol === ref)) {
+          // Check if the referenced symbol is imported
+          const fileImports = extractImportedSymbols(entryContent);
+          for (const [mod, syms] of fileImports) {
+            if (syms.has(ref)) {
+              toProcess.push({ symbol: ref, moduleSpec: mod, contextDir: dirname(entryPath) });
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Queue all imported symbols for processing
+  for (const [moduleSpec, symbols] of importedSymbols) {
+    for (const symbol of symbols) {
+      if (symbol !== "*") {
+        // Skip namespace imports for now
+        toProcess.push({ symbol, moduleSpec, contextDir: dirname(entryPath) });
+      }
+    }
+  }
+
+  // Process each symbol
+  while (toProcess.length > 0) {
+    const { symbol, moduleSpec, contextDir } = toProcess.shift()!;
+
+    // Skip if already resolved
+    if (resolvedSymbols.has(symbol)) {
+      continue;
+    }
+
+    console.log(`Resolving symbol: ${symbol} from ${moduleSpec}`);
+
+    // Resolve the symbol to its definition
+    const resolved = await resolveSymbolDefinition(
+      symbol,
+      moduleSpec,
+      importMap,
+      contextDir,
+      rootAbs,
+    );
+
+    if (resolved) {
+      resolvedSymbols.set(symbol, resolved);
+      console.log(`✓ Resolved ${symbol} in ${resolved.filePath}`);
+
+      // Extract ALL other exported symbols from this file (to capture dependencies like const references)
+      const fileContent = await Deno.readTextFile(resolved.filePath);
+      const allExportedSymbols = extractExportedSymbolNames(fileContent);
+
+      for (const exportedSymbol of allExportedSymbols) {
+        if (!resolvedSymbols.has(exportedSymbol) && !toProcess.some(p => p.symbol === exportedSymbol)) {
+          // Queue this symbol for resolution from the same file
+          toProcess.push({
+            symbol: exportedSymbol,
+            moduleSpec: resolved.filePath.startsWith('/') ? resolved.filePath : `./${resolved.filePath}`,
+            contextDir: dirname(resolved.filePath)
+          });
+        }
+      }
+
+      // Extract references to other symbols in this definition
+      // Look for type references, extends clauses, etc.
+      const symbolRefs = extractSymbolReferences(resolved.definition);
+      for (const ref of symbolRefs) {
+        if (!resolvedSymbols.has(ref) && !toProcess.some(p => p.symbol === ref)) {
+          // Try to find where this symbol comes from
+          // For now, assume it's in the same file or imported in that file
+          const fileImports = extractImportedSymbols(fileContent);
+
+          for (const [mod, syms] of fileImports) {
+            if (syms.has(ref)) {
+              toProcess.push({ symbol: ref, moduleSpec: mod, contextDir: dirname(resolved.filePath) });
+              break;
+            }
+          }
+        }
+      }
+    } else {
+      console.warn(`Could not resolve symbol: ${symbol} from ${moduleSpec}`);
+    }
+  }
+
+  return resolvedSymbols;
+}
+
+/**
+ * Extract symbol references from a definition using AST (types and values used in the definition)
+ */
+function extractSymbolReferences(definition: string): string[] {
+  const refs = new Set<string>();
+
+  // Parse the definition into an AST
+  const sourceFile = ts.createSourceFile(
+    "temp.ts",
+    definition,
+    ts.ScriptTarget.Latest,
+    true
+  );
+
+  // Built-in types to skip
+  const builtInTypes = new Set([
+    "String", "Number", "Boolean", "Date", "Array", "Object",
+    "Promise", "Record", "Map", "Set", "Error", "any", "unknown",
+    "void", "never", "null", "undefined", "symbol", "bigint",
+    "typeof"  // Skip typeof keyword
+  ]);
+
+  // Walk the AST to find type and value references
+  function visit(node: ts.Node) {
+    // Check if this is a type reference node
+    if (ts.isTypeReferenceNode(node)) {
+      // Get the type name
+      if (ts.isIdentifier(node.typeName)) {
+        const typeName = node.typeName.text;
+        // Only include if it's not a built-in type and starts with uppercase
+        if (!builtInTypes.has(typeName) && /^[A-Z]/.test(typeName)) {
+          refs.add(typeName);
+        }
+      } else if (ts.isQualifiedName(node.typeName)) {
+        // Handle qualified names like Namespace.Type
+        // For now, just extract the rightmost identifier
+        let current: ts.EntityName = node.typeName;
+        while (ts.isQualifiedName(current)) {
+          current = current.right;
+        }
+        if (ts.isIdentifier(current)) {
+          const typeName = current.text;
+          if (!builtInTypes.has(typeName) && /^[A-Z]/.test(typeName)) {
+            refs.add(typeName);
+          }
+        }
+      }
+    }
+
+    // Also check for value references (identifiers that could be constants/variables)
+    // This catches things like "recordingSource" in typeof expressions
+    if (ts.isIdentifier(node)) {
+      const name = node.text;
+      // Check if it's a likely symbol name (starts with lowercase, not a keyword)
+      // and not in a property access (node.parent is not a property access on the right side)
+      if (name.length > 0 && /^[a-z]/.test(name) && !builtInTypes.has(name)) {
+        // Skip if this is part of a property declaration name or parameter name
+        const parent = node.parent;
+        if (!ts.isPropertyDeclaration(parent) &&
+            !ts.isParameter(parent) &&
+            !ts.isVariableDeclaration(parent) &&
+            !ts.isMethodDeclaration(parent) &&
+            !ts.isFunctionDeclaration(parent)) {
+          refs.add(name);
+        }
+      }
+    }
+
+    // Continue walking
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+
+  return Array.from(refs);
+}
+
+/**
+ * Build a set of files that are directly imported by recursively following imports from the entry file
+ */
+async function buildDirectImportGraph(
+  entryPath: string,
+  denoInfoModules: any[],
+  importMap: Record<string, string> | null,
+  configDir: string,
+  rootAbs: string,
+): Promise<Set<string>> {
+  const directlyImportedFiles = new Set<string>();
+  const toProcess = [entryPath];
+  const processed = new Set<string>();
+
+  // Build a map from file path to module info for quick lookup
+  const pathToModule = new Map<string, any>();
+  for (const module of denoInfoModules) {
+    if (module.local) {
+      const localPath = module.local.startsWith("file://")
+        ? fromFileUrl(module.local)
+        : module.local;
+      pathToModule.set(localPath, module);
+    }
+  }
+
+  while (toProcess.length > 0) {
+    const currentPath = toProcess.shift()!;
+    if (processed.has(currentPath)) continue;
+    processed.add(currentPath);
+
+    directlyImportedFiles.add(currentPath);
+
+    try {
+      // Read the file and extract its imports
+      const fileContent = await Deno.readTextFile(currentPath);
+      const importPaths = extractAllImportPaths(fileContent);
+
+      for (const importSpec of importPaths) {
+        // Resolve the import specifier to an absolute path
+        let resolvedPath: string;
+
+        if (importSpec.startsWith(".") || importSpec.startsWith("/")) {
+          // Relative or absolute local import
+          resolvedPath = resolve(dirname(currentPath), importSpec);
+        } else if (importMap) {
+          // Try to resolve using import map (for @dto/, @libs/, etc.)
+          resolvedPath = resolveImportMapAlias(importSpec, importMap, configDir);
+          if (!resolvedPath.startsWith("/")) {
+            // If still not absolute, skip external imports
+            continue;
+          }
+        } else {
+          // External import, skip
+          continue;
+        }
+
+        // Add .ts extension if missing (TypeScript imports often omit extension)
+        if (!resolvedPath.endsWith(".ts") && !resolvedPath.endsWith(".tsx")) {
+          // Try common patterns
+          const candidates = [
+            resolvedPath + ".ts",
+            resolvedPath + "/mod.ts",
+            resolvedPath + ".tsx",
+          ];
+
+          for (const candidate of candidates) {
+            try {
+              const stat = await Deno.stat(candidate);
+              if (stat.isFile) {
+                resolvedPath = candidate;
+                break;
+              }
+            } catch {
+              // Try next candidate
+            }
+          }
+        }
+
+        // Only process if it's within the project root
+        if (
+          (resolvedPath.startsWith(rootAbs + "/") || resolvedPath === rootAbs) &&
+          !resolvedPath.includes("/node_modules/") &&
+          (resolvedPath.endsWith(".ts") || resolvedPath.endsWith(".tsx"))
+        ) {
+          toProcess.push(resolvedPath);
+        }
+      }
+    } catch (e) {
+      // File read error, skip
+      console.warn(`Could not process imports from ${currentPath}: ${e.message}`);
+    }
+  }
+
+  return directlyImportedFiles;
+}
+
+/**
  * Generate verbose stubs for external dependencies
  */
 function generateVerboseStubs(allImports: Map<string, Set<string>>): string {
@@ -501,6 +1306,13 @@ function transformReExports(code: string): string {
     "// [Removed: export * from module]",
   );
 
+  // Remove bare re-exports (without 'from' clause) - these cause duplicate declarations
+  // This handles multi-line export blocks
+  result = result.replace(
+    /^export\s+\{[^}]+\};?\s*$/gm,
+    "// [Removed bare re-export]",
+  );
+
   return result;
 }
 
@@ -584,10 +1396,24 @@ async function concat(entry: string): Promise<{
   const { stdout } = await cmd.output();
   const info = JSON.parse(new TextDecoder().decode(stdout));
 
-  // Try to get git root, but if not in a git repo, use the entry file's directory as root
+  // Try to get git root from the entry file's directory, not the current directory
   let rootAbs: string;
   try {
-    rootAbs = await getGitRoot();
+    // Run git from the entry file's directory
+    const entryDir = dirname(resolve(resolvedEntry));
+    const gitCmd = new Deno.Command("git", {
+      args: ["rev-parse", "--show-toplevel"],
+      cwd: entryDir,
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const { code, stdout: gitStdout } = await gitCmd.output();
+    if (code === 0) {
+      rootAbs = resolve(new TextDecoder().decode(gitStdout).trim());
+    } else {
+      // Not in git repo, use directory of entry file
+      rootAbs = entryDir;
+    }
   } catch {
     // Not in git repo, use directory of entry file
     rootAbs = dirname(resolve(resolvedEntry));
@@ -600,97 +1426,113 @@ async function concat(entry: string): Promise<{
   // Get the resolved entry file path for comparison
   const resolvedEntryPath = resolve(resolvedEntry);
 
-  // Process modules - entry file first, then dependencies
-  const modules = (info.modules || []).slice();
+  // Build symbol-level dependency graph
+  const resolvedSymbols = await buildSymbolDependencyGraph(
+    resolvedEntryPath,
+    importMap,
+    configDir,
+    rootAbs,
+  );
 
-  // Find the entry file module
-  let entryModule = null;
-  const otherModules = [];
+  console.log(
+    `✓ Symbol resolution complete: ${resolvedSymbols.size} symbols resolved`,
+  );
 
-  for (const module of modules) {
-    if (module.local) {
-      const localPath = module.local.startsWith("file://")
-        ? fromFileUrl(module.local)
-        : module.local;
+  // Build dependency graph for topological sorting
+  const symbolDeps = new Map<string, Set<string>>();
+  for (const [symbolName, symbolData] of resolvedSymbols) {
+    const deps = extractSymbolReferences(symbolData.definition);
+    // Only include dependencies that are in our resolved symbols
+    const filteredDeps = deps.filter(dep => resolvedSymbols.has(dep));
+    symbolDeps.set(symbolName, new Set(filteredDeps));
+  }
 
-      if (localPath === resolvedEntryPath) {
-        entryModule = module;
-      } else {
-        otherModules.push(module);
+  // Topological sort to order symbols by dependencies
+  const sortedSymbols: string[] = [];
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+
+  function visit(symbolName: string): boolean {
+    if (visited.has(symbolName)) return true;
+    if (visiting.has(symbolName)) {
+      // Circular dependency detected - skip
+      console.warn(`Circular dependency detected for symbol: ${symbolName}`);
+      return false;
+    }
+
+    visiting.add(symbolName);
+    const deps = symbolDeps.get(symbolName) || new Set();
+
+    for (const dep of deps) {
+      if (!visit(dep)) {
+        // If dependency has circular ref, still proceed
+        continue;
       }
-    } else {
-      otherModules.push(module);
+    }
+
+    visiting.delete(symbolName);
+    visited.add(symbolName);
+    sortedSymbols.push(symbolName);
+    return true;
+  }
+
+  // Visit all symbols
+  for (const symbolName of resolvedSymbols.keys()) {
+    visit(symbolName);
+  }
+
+  console.log(`✓ Sorted ${sortedSymbols.length} symbols in dependency order`);
+
+  // Group sorted symbols by file for organized output
+  const symbolsByFile = new Map<string, Array<{ name: string; jsdoc?: string; definition: string }>>();
+
+  for (const symbolName of sortedSymbols) {
+    const symbolData = resolvedSymbols.get(symbolName)!;
+    if (!symbolsByFile.has(symbolData.filePath)) {
+      symbolsByFile.set(symbolData.filePath, []);
+    }
+    symbolsByFile.get(symbolData.filePath)!.push({
+      name: symbolName,
+      jsdoc: symbolData.jsdoc,
+      definition: symbolData.definition,
+    });
+  }
+
+  // Extract external imports from all resolved symbol definitions
+  for (const symbolData of resolvedSymbols.values()) {
+    try {
+      const fileContent = await Deno.readTextFile(symbolData.filePath);
+      const fileImports = extractImports(fileContent);
+      for (const [module, items] of fileImports) {
+        if (!externalImports.has(module)) {
+          externalImports.set(module, new Set());
+        }
+        items.forEach((item) => externalImports.get(module)!.add(item));
+      }
+    } catch (e) {
+      console.warn(`Could not read file ${symbolData.filePath}: ${e.message}`);
     }
   }
 
-  // Process entry file first, then other modules in reverse order (dependencies first)
-  const orderedModules = entryModule
-    ? [entryModule, ...otherModules.reverse()]
-    : otherModules.reverse();
+  // Build content from resolved symbols grouped by file
+  for (const [filePath, symbols] of symbolsByFile) {
+    localFiles.push(filePath);
 
-  for (const module of orderedModules) {
-    // Process local files
-    if (module.local) {
-      // Handle both file:// URLs and direct paths
-      const localPath = module.local.startsWith("file://")
-        ? fromFileUrl(module.local)
-        : module.local;
+    content += `\n// ============================================\n`;
+    content += `// Source: ${filePath}\n`;
+    content += `// ============================================\n\n`;
 
-      // EXPERIMENTAL: Skip if already processed
-      if (processedFiles.has(localPath)) continue;
-      processedFiles.add(localPath);
-
-      // Check if it's a local project file
-      const isInProject =
-        localPath.startsWith(rootAbs + "/") || localPath === rootAbs;
-      const isNotNodeModules = !localPath.includes("/node_modules/");
-      const isTsFile = localPath.endsWith(".ts") || localPath.endsWith(".tsx");
-
-      if (isInProject && isNotNodeModules && isTsFile) {
-        localFiles.push(localPath);
-
-        try {
-          // Read and process file
-          let fileContent = await Deno.readTextFile(localPath);
-
-          // Extract imports before removing them
-          const fileImports = extractImports(fileContent);
-          for (const [module, items] of fileImports) {
-            if (!externalImports.has(module)) {
-              externalImports.set(module, new Set());
-            }
-            items.forEach((item) => externalImports.get(module)!.add(item));
-          }
-
-          // Process content - preserve JSDoc while removing imports/decorators
-          fileContent = removeImports(fileContent);
-          fileContent = removeDecorators(fileContent);
-          fileContent = transformReExports(fileContent);
-
-          // Check if file has meaningful content (don't strip JSDoc!)
-          // Only look for actual code, not comments
-          const hasCode = fileContent.match(
-            /(?:export|class|interface|type|const|function|enum)\s+\w+/,
-          );
-          const hasJSDoc = fileContent.includes("/**");
-
-          // Include file if it has code OR JSDoc documentation
-          if (!hasCode && !hasJSDoc) {
-            console.log(
-              `Note: File contains only imports/comments, may have limited documentation: ${localPath}`,
-            );
-            // Still include the file header for reference
-          }
-
-          content += `\n// ============================================\n`;
-          content += `// Source: ${localPath}\n`;
-          content += `// ============================================\n\n`;
-          content += fileContent;
-        } catch (e) {
-          console.warn(`Skipping file ${localPath}: ${e.message}`);
-          continue; // Skip but continue processing
-        }
+    for (const symbol of symbols) {
+      // Add JSDoc if present
+      if (symbol.jsdoc) {
+        content += symbol.jsdoc + "\n";
       }
+
+      // Remove decorators from the symbol definition
+      let cleanedDefinition = removeDecorators(symbol.definition);
+
+      // Add the symbol definition
+      content += cleanedDefinition + "\n\n";
     }
   }
 
