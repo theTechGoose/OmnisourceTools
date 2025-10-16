@@ -441,7 +441,6 @@ async function main() {
     configPath,
     "--port=9501"
   ];
-  console.log(config_default);
   await runCmd("string", ...denoCmd, "|", ...logdyCmd);
 }
 async function prep() {

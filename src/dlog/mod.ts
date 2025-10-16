@@ -8,7 +8,6 @@ async function main() {
   const configPath = await prep();
   const denoCmd = [`deno`, ...Deno.args];
   const logdyCmd = ["logdy", "--config", configPath, "--port=9501"];
-  console.log(cfg);
   await runCmd("string", ...denoCmd, "|", ...logdyCmd);
 }
 
@@ -35,9 +34,11 @@ export async function ensureConfigAsync(configPath: string, cfg: unknown) {
   // Only write if different or missing
   if (existing !== desired) {
     await Deno.writeTextFile(configPath, desired);
-    console.log(existing === null
-      ? `Created default Logdy config at ${configPath}`
-      : `Updated Logdy config at ${configPath}`);
+    console.log(
+      existing === null
+        ? `Created default Logdy config at ${configPath}`
+        : `Updated Logdy config at ${configPath}`,
+    );
   }
 }
 
